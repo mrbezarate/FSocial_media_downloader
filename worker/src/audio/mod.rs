@@ -28,22 +28,51 @@ pub async fn process_spotify_task(
         }
     };
 
-    let yt_url = matcher::find_on_youtube(&ctx.config, &meta).await?;
-    info!("Matched Spotify track to YouTube URL: {}", yt_url);
-
-    let proxy = ctx.proxy_pool.next();
-    let ytdlp_out = ytdlp::download(
-        &ctx.config,
-        &yt_url,
-        &Quality::AudioBest,
-        &ctx.config.shared_data_path,
-        proxy,
-        progress_tx,
-    ).await?;
-
-    if let Some(p) = proxy {
-        ctx.proxy_pool.mark_success(p);
-    }
+    let mut attempts = 0;
+    let max_attempts = if ctx.config.proxies_enabled() { 3 } else { 1 };
+    
+    let ytdlp_out = loop {
+        attempts += 1;
+        let proxy = ctx.proxy_pool.next();
+        
+        match matcher::find_on_youtube(&ctx.config, &meta, proxy).await {
+            Ok(yt_url) => {
+                info!("Matched Spotify track to YouTube URL: {}", yt_url);
+                
+                match ytdlp::download(
+                    &ctx.config,
+                    &yt_url,
+                    &Quality::AudioBest,
+                    &ctx.config.shared_data_path,
+                    proxy,
+                    progress_tx.clone(),
+                ).await {
+                    Ok(out) => {
+                        if let Some(p) = proxy {
+                            ctx.proxy_pool.mark_success(p);
+                        }
+                        break out;
+                    }
+                    Err(e) => {
+                        if let Some(p) = proxy {
+                            ctx.proxy_pool.mark_failed(p);
+                        }
+                        if attempts >= max_attempts {
+                            return Err(e);
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                if let Some(p) = proxy {
+                    ctx.proxy_pool.mark_failed(p);
+                }
+                if attempts >= max_attempts {
+                    return Err(e);
+                }
+            }
+        }
+    };
 
     let mut cover_data = None;
     let mut thumb_path = None;
