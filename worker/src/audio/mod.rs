@@ -10,7 +10,7 @@ use tracing::info;
 pub async fn process_spotify_task(
     ctx: &WorkerContext,
     task: &DownloadTask,
-    progress_tx: Option<tokio::sync::mpsc::Sender<String>>,
+    progress_tx: Option<tokio::sync::mpsc::Sender<fsocial_common::ProgressEvent>>,
 ) -> Result<(String, String, Option<u64>, Option<String>, Option<String>), AppError> {
     let spotify_client = spotify::SpotifyClient::new();
     

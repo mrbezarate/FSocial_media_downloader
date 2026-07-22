@@ -219,33 +219,74 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                 "Начинаю загрузку..."
             ).await;
 
-            let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(100);
+            let (tx, mut rx) = tokio::sync::mpsc::channel::<fsocial_common::ProgressEvent>(100);
             let ctx_prog = ctx_clone.clone();
             let task_id_prog = task.task_id.clone();
             let chat_id_prog = task.chat_id;
             let status_msg_id_prog = task.status_message_id;
+            let is_playlist_mode_prog = task.playlist_urls.as_ref().map_or(1, |v| v.len()) > 1;
+
+            fn format_eta(eta: &str) -> Option<String> {
+                let cleaned = eta.replace("~", "").replace("?", "");
+                if cleaned.is_empty() { return None; }
+                let parts: Vec<&str> = cleaned.split(':').collect();
+                let mut result = String::new();
+                if parts.len() == 3 {
+                    let h = parts[0].parse::<u32>().unwrap_or(0);
+                    let m = parts[1].parse::<u32>().unwrap_or(0);
+                    let s = parts[2].parse::<u32>().unwrap_or(0);
+                    if h > 0 { result.push_str(&format!("{} ч ", h)); }
+                    if m > 0 { result.push_str(&format!("{} мин ", m)); }
+                    if s > 0 || (h == 0 && m == 0) { result.push_str(&format!("{} сек", s)); }
+                } else if parts.len() == 2 {
+                    let m = parts[0].parse::<u32>().unwrap_or(0);
+                    let s = parts[1].parse::<u32>().unwrap_or(0);
+                    if m > 0 { result.push_str(&format!("{} мин ", m)); }
+                    if s > 0 || m == 0 { result.push_str(&format!("{} сек", s)); }
+                } else { return None; }
+                Some(result.trim().to_string())
+            }
 
             tokio::spawn(async move {
                 let mut last_percent = 0;
-                while let Some(line) = rx.recv().await {
-                    if let Some(caps) = re.captures(&line) {
-                        if let (Some(p), Some(size)) = (caps.name("percent"), caps.name("size")) {
-                            if let Ok(percent) = p.as_str().parse::<f32>() {
-                                let pct = percent as u8;
-                                // Only update every 10% to avoid telegram rate limits
-                                if pct >= last_percent + 10 || pct == 100 {
-                                    last_percent = pct;
-                                    let speed = caps.name("speed").map_or("?", |m| m.as_str());
-                                    let eta = caps.name("eta").map_or("?", |m| m.as_str());
-                                    let text = format!("Размер: {} | Скорость: {} | Осталось: {}", size.as_str(), speed, eta);
-                                    publish_progress(
-                                        &ctx_prog.nats_jetstream,
-                                        &task_id_prog,
-                                        chat_id_prog,
-                                        status_msg_id_prog,
-                                        pct,
-                                        &text
-                                    ).await;
+                let mut current_idx = 0;
+                let mut total_tracks = 1;
+
+                while let Some(event) = rx.recv().await {
+                    match event {
+                        fsocial_common::ProgressEvent::NewTrack(idx, total) => {
+                            current_idx = idx;
+                            total_tracks = total;
+                            last_percent = 0; // reset for new track
+                        }
+                        fsocial_common::ProgressEvent::Line(line) => {
+                            if let Some(caps) = re.captures(&line) {
+                                if let (Some(p), Some(_size)) = (caps.name("percent"), caps.name("size")) {
+                                    if let Ok(percent) = p.as_str().parse::<f32>() {
+                                        let pct = percent as u8;
+                                        if pct >= last_percent + 10 || pct == 100 {
+                                            last_percent = pct;
+                                            let eta = caps.name("eta").map_or("?", |m| m.as_str());
+                                            
+                                            let mut text = format!("Скачивание: {}%", pct);
+                                            if let Some(formatted_eta) = format_eta(eta) {
+                                                text = format!("{} | Осталось: {}", text, formatted_eta);
+                                            }
+
+                                            if is_playlist_mode_prog {
+                                                text = format!("Скачивание плейлиста: {}/{}\n⏳ {}", current_idx + 1, total_tracks, text);
+                                            }
+
+                                            publish_progress(
+                                                &ctx_prog.nats_jetstream,
+                                                &task_id_prog,
+                                                chat_id_prog,
+                                                status_msg_id_prog,
+                                                pct,
+                                                &text
+                                            ).await;
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -283,6 +324,7 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                     if let Err(e) = ctx_clone.nats_jetstream.publish(fsocial_common::subjects::TASK_PROGRESS.to_string(), payload.into()).await {
                         tracing::error!("Failed to publish PlaylistProgress: {:?}", e);
                     }
+                    let _ = tx.send(fsocial_common::ProgressEvent::NewTrack(idx, total)).await;
                 }
                 
                 // ack_wait is set to 3600s so it won't redeliver

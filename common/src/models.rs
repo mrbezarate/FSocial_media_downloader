@@ -308,3 +308,9 @@ pub mod subjects {
     /// Subject for info requests (Gateway → Workers, request-reply)
     pub const INFO_REQUEST: &str = "tasks.info";
 }
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum ProgressEvent {
+    Line(String),
+    NewTrack(usize, usize),
+}

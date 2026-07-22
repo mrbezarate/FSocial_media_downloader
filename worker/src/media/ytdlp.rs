@@ -21,7 +21,7 @@ pub async fn download(
     quality: &Quality,
     output_dir: &str,
     proxy: Option<&str>,
-    progress_tx: Option<tokio::sync::mpsc::Sender<String>>,
+    progress_tx: Option<tokio::sync::mpsc::Sender<fsocial_common::ProgressEvent>>,
 ) -> Result<YtDlpOutput, AppError> {
     let uuid = uuid::Uuid::new_v4().to_string();
     let mut cmd = Command::new(&config.ytdlp_path);
@@ -76,7 +76,7 @@ pub async fn download(
     while let Ok(Some(line)) = reader.next_line().await {
         if line.starts_with("[download]") && line.contains("%") {
             if let Some(tx) = &progress_tx {
-                let _ = tx.send(line).await;
+                let _ = tx.send(fsocial_common::ProgressEvent::Line(line)).await;
             }
         }
     }

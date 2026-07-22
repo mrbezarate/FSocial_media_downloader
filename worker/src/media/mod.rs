@@ -9,7 +9,7 @@ use tracing::{info, warn};
 pub async fn process_media_task(
     ctx: &WorkerContext,
     task: &DownloadTask,
-    progress_tx: Option<tokio::sync::mpsc::Sender<String>>,
+    progress_tx: Option<tokio::sync::mpsc::Sender<fsocial_common::ProgressEvent>>,
 ) -> Result<(String, String, Option<u64>), AppError> {
     if let Some(cached) = ctx.cache.get(&task.url).await {
         info!("Cache hit for URL: {}", task.url);

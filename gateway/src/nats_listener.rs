@@ -196,9 +196,9 @@ async fn handle_result(bot: &Bot, res: TaskResult, config: &AppConfig) {
 
 async fn handle_progress(bot: &Bot, res: TaskResult) {
     match res.status {
-        TaskStatus::Progress { percent, status_text } => {
+        TaskStatus::Progress { percent: _, status_text } => {
             if let Some(msg_id) = res.status_message_id {
-                let text = format!("⏳ {} {}%", status_text, percent);
+                let text = format!("⏳ {}", status_text);
 
                 if let Err(_) = bot.edit_message_text(teloxide::types::ChatId(res.chat_id), teloxide::types::MessageId(msg_id), text.clone()).await {
                     let _ = bot.edit_message_caption(teloxide::types::ChatId(res.chat_id), teloxide::types::MessageId(msg_id)).caption(text).await;
