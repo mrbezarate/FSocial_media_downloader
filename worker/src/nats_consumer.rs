@@ -66,7 +66,6 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                     durable_name: Some(subjects::WORKER_GROUP.to_string()),
                     filter_subject: subjects::DOWNLOAD_TASKS.to_string(),
                     ack_wait: std::time::Duration::from_secs(3600),
-                    deliver_policy: async_nats::jetstream::consumer::DeliverPolicy::New,
                     ..Default::default()
                 },
             )
