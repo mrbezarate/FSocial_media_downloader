@@ -89,8 +89,28 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                 if let Ok(req) = serde_json::from_slice::<fsocial_common::InfoRequest>(&msg.payload) {
                     if let Some(reply) = msg.reply {
                         let res = if req.url.contains("spotify.com") {
+                            let mut playlist_urls = Vec::new();
+                            let is_playlist = req.url.contains("/playlist/") || req.url.contains("/album/");
+                            
+                            if is_playlist {
+                                let client = reqwest::Client::new();
+                                if let Ok(resp) = client.get(&req.url).send().await {
+                                    if let Ok(html) = resp.text().await {
+                                        let re = regex::Regex::new(r"spotify:track:([a-zA-Z0-9]+)").unwrap();
+                                        for cap in re.captures_iter(&html) {
+                                            if let Some(id) = cap.get(1) {
+                                                let track_url = format!("https://open.spotify.com/track/{}", id.as_str());
+                                                if !playlist_urls.contains(&track_url) {
+                                                    playlist_urls.push(track_url);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
                             Ok(fsocial_common::InfoResponse {
-                                title: "Spotify Audio".to_string(),
+                                title: if is_playlist { "Spotify Плейлист/Альбом".to_string() } else { "Spotify Audio".to_string() },
                                 uploader: Some("Spotify".to_string()),
                                 thumbnail: None,
                                 duration_secs: None,
@@ -102,9 +122,9 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                                     display_label: "🎵 MP3".to_string(),
                                     full_button_label: "🎵 MP3".to_string(),
                                 }],
-                                is_playlist: req.url.contains("/playlist/") || req.url.contains("/album/"),
-                                playlist_count: None,
-                                playlist_urls: vec![],
+                                is_playlist,
+                                playlist_count: if is_playlist { Some(playlist_urls.len() as u32) } else { None },
+                                playlist_urls,
                                 error: None,
                             })
                         } else if req.url.contains("soundcloud.com") {
