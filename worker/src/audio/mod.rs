@@ -11,7 +11,7 @@ pub async fn process_spotify_task(
     ctx: &WorkerContext,
     task: &DownloadTask,
     progress_tx: Option<tokio::sync::mpsc::Sender<String>>,
-) -> Result<(String, String, Option<u64>, Option<String>), AppError> {
+) -> Result<(String, String, Option<u64>, Option<String>, Option<String>), AppError> {
     let spotify_client = spotify::SpotifyClient::new();
     
     let meta = if let Some(m) = &task.spotify_meta {
@@ -46,9 +46,18 @@ pub async fn process_spotify_task(
     }
 
     let mut cover_data = None;
+    let mut thumb_path = None;
+    
     if let Some(ref cover_url) = meta.cover_url {
         match tagger::download_cover(cover_url).await {
-            Ok(c) => cover_data = Some(c),
+            Ok(c) => {
+                cover_data = Some(c.clone());
+                // Save cover to disk for Telegram API
+                let cover_path = format!("{}_cover.jpg", ytdlp_out.file_path);
+                if let Ok(_) = tokio::fs::write(&cover_path, &c).await {
+                    thumb_path = Some(cover_path);
+                }
+            },
             Err(e) => info!("Failed to download cover: {:?}", e),
         }
     }
@@ -59,6 +68,7 @@ pub async fn process_spotify_task(
         ytdlp_out.file_path,
         meta.title.clone(),
         Some(meta.duration_ms / 1000),
-        Some(meta.primary_artist().to_string())
+        Some(meta.primary_artist().to_string()),
+        thumb_path,
     ))
 }

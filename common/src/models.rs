@@ -215,7 +215,7 @@ pub enum TaskStatus {
         is_audio: bool,
     },
     PlaylistCompleted {
-        files: Vec<(String, String, Option<u64>, Option<String>, bool)>, // path, title, duration, performer, is_audio
+        files: Vec<(String, String, Option<u64>, Option<String>, Option<String>, bool)>, // path, title, duration, performer, thumb_path, is_audio
         playlist_title: String,
     },
     Failed {

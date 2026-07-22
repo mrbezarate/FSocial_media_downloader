@@ -35,6 +35,7 @@ async fn handle_result(bot: &Bot, res: TaskResult, config: &AppConfig) {
             title,
             is_audio,
             performer,
+            thumb_path,
             ..
         } => {
             let path = PathBuf::from(&file_path);
@@ -56,6 +57,9 @@ async fn handle_result(bot: &Bot, res: TaskResult, config: &AppConfig) {
                     .await;
 
                     let _ = tokio::fs::remove_file(&file_path).await;
+                    if let Some(thumb) = &thumb_path {
+                        let _ = tokio::fs::remove_file(thumb).await;
+                    }
                     return;
                 }
             }
@@ -74,6 +78,13 @@ async fn handle_result(bot: &Bot, res: TaskResult, config: &AppConfig) {
                 let mut req = bot.send_audio(chat_id, input_file).title(title);
                 if let Some(perf) = performer {
                     req = req.performer(perf);
+                }
+                if let Some(thumb) = &thumb_path {
+                    let thumb_file = match tokio::fs::read(thumb).await {
+                        Ok(data) => InputFile::memory(data).file_name("cover.jpg"),
+                        Err(_) => InputFile::file(thumb.clone())
+                    };
+                    req = req.thumbnail(thumb_file);
                 }
                 if let Some(reply_id) = res.reply_to_message_id {
                     req = req.reply_parameters(teloxide::types::ReplyParameters::new(teloxide::types::MessageId(reply_id)));
@@ -97,6 +108,9 @@ async fn handle_result(bot: &Bot, res: TaskResult, config: &AppConfig) {
                     if let Err(e) = tokio::fs::remove_file(&file_path).await {
                         error!("Failed to clean up file {}: {}", file_path, e);
                     }
+                    if let Some(thumb) = &thumb_path {
+                        let _ = tokio::fs::remove_file(thumb).await;
+                    }
                 }
                 Err(e) => {
                     error!("Failed to send file: {}", e);
@@ -116,7 +130,7 @@ async fn handle_result(bot: &Bot, res: TaskResult, config: &AppConfig) {
             // Chunk files into groups of 10
             for chunk in files.chunks(10) {
                 let mut media_group = Vec::new();
-                for (file_path, title, duration_secs, performer, is_audio) in chunk {
+                for (file_path, title, _duration_secs, performer, thumb_path, is_audio) in chunk {
                     let path = PathBuf::from(file_path);
                     let input_file = match tokio::fs::read(&path).await {
                         Ok(data) => {
@@ -130,6 +144,13 @@ async fn handle_result(bot: &Bot, res: TaskResult, config: &AppConfig) {
                         let mut audio = InputMediaAudio::new(input_file).title(title.clone());
                         if let Some(perf) = performer {
                             audio = audio.performer(perf.clone());
+                        }
+                        if let Some(thumb) = thumb_path {
+                            let thumb_file = match tokio::fs::read(thumb).await {
+                                Ok(data) => InputFile::memory(data).file_name("cover.jpg"),
+                                Err(_) => InputFile::file(thumb.clone())
+                            };
+                            audio = audio.thumbnail(thumb_file);
                         }
                         media_group.push(InputMedia::Audio(audio));
                     } else {
@@ -153,8 +174,11 @@ async fn handle_result(bot: &Bot, res: TaskResult, config: &AppConfig) {
                 let _ = bot.delete_message(chat_id, mid).await;
             }
 
-            for (file_path, _, _, _, _) in files {
+            for (file_path, _, _, _, thumb_path, _) in files {
                 let _ = tokio::fs::remove_file(&file_path).await;
+                if let Some(thumb) = thumb_path {
+                    let _ = tokio::fs::remove_file(thumb).await;
+                }
             }
         }
         TaskStatus::Failed { error, .. } => {

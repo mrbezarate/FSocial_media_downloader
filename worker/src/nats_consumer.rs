@@ -42,7 +42,10 @@ pub async fn publish_progress(
             status_text: text.to_string(),
         },
     };
-    publish_result(js, &res).await;
+    let payload = serde_json::to_vec(&res).unwrap();
+    if let Err(e) = js.publish(fsocial_common::subjects::TASK_PROGRESS.to_string(), payload.into()).await {
+        tracing::error!("Failed to publish TaskProgress: {:?}", e);
+    }
 }
 
 pub async fn run(ctx: Arc<WorkerContext>) {
@@ -60,6 +63,7 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                 Config {
                     durable_name: Some(subjects::WORKER_GROUP.to_string()),
                     filter_subject: subjects::DOWNLOAD_TASKS.to_string(),
+                    ack_wait: std::time::Duration::from_secs(3600),
                     ..Default::default()
                 },
             )
@@ -275,8 +279,13 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                             status_text: text,
                         },
                     };
-                    publish_result(&ctx_clone.nats_jetstream, &res).await;
+                    let payload = serde_json::to_vec(&res).unwrap();
+                    if let Err(e) = ctx_clone.nats_jetstream.publish(fsocial_common::subjects::TASK_PROGRESS.to_string(), payload.into()).await {
+                        tracing::error!("Failed to publish PlaylistProgress: {:?}", e);
+                    }
                 }
+                
+                // ack_wait is set to 3600s so it won't redeliver
 
                 let mut current_task = task.clone();
                 current_task.url = url.clone();
@@ -287,12 +296,12 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                     audio::process_spotify_task(&ctx_clone, &current_task, Some(tx.clone())).await
                 } else {
                     media::process_media_task(&ctx_clone, &current_task, Some(tx.clone())).await
-                        .map(|(path, title, dur)| (path, title, dur, None))
+                        .map(|(path, title, dur)| (path, title, dur, None, None))
                 };
 
                 match result {
-                    Ok((file_path, title, duration_secs, performer)) => {
-                        completed_files.push((file_path, title, duration_secs, performer, current_task.quality.is_audio()));
+                    Ok((file_path, title, duration_secs, performer, thumb_path)) => {
+                        completed_files.push((file_path, title, duration_secs, performer, thumb_path, current_task.quality.is_audio()));
                     }
                     Err(e) => {
                         if first_error.is_none() {
@@ -359,7 +368,7 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                         let _ = msg.ack().await;
                     }
                 } else if !completed_files.is_empty() {
-                    let (file_path, title, duration_secs, performer, is_audio) = completed_files.remove(0);
+                    let (file_path, title, duration_secs, performer, thumb_path, is_audio) = completed_files.remove(0);
                     let res = TaskResult {
                         task_id: task.task_id.clone(),
                         chat_id: task.chat_id,
@@ -371,7 +380,7 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                             title,
                             duration_secs,
                             performer,
-                            thumb_path: None,
+                            thumb_path,
                             is_audio,
                         },
                     };
