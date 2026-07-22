@@ -141,9 +141,9 @@ impl SpotifyClient {
             .await
             .map_err(|e| AppError::Spotify(e.to_string()))?;
 
-        let title_re = regex::Regex::new(r#"<meta property="og:title" content="([^"]+)" />"#).unwrap();
-        let desc_re = regex::Regex::new(r#"<meta property="og:description" content="([^"]+)" />"#).unwrap();
-        let img_re = regex::Regex::new(r#"<meta property="og:image" content="([^"]+)" />"#).unwrap();
+        let title_re = regex::Regex::new(r#"<meta property="og:title" content="([^"]+)"\s*/?>"#).unwrap();
+        let desc_re = regex::Regex::new(r#"<meta property="og:description" content="([^"]+)"\s*/?>"#).unwrap();
+        let img_re = regex::Regex::new(r#"<meta property="og:image" content="([^"]+)"\s*/?>"#).unwrap();
 
         let title = title_re.captures(&html).and_then(|c| c.get(1)).map(|m| m.as_str().to_string()).unwrap_or_else(|| "Unknown".to_string());
         let desc = desc_re.captures(&html).and_then(|c| c.get(1)).map(|m| m.as_str().to_string()).unwrap_or_default();
