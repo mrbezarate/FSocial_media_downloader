@@ -47,7 +47,7 @@ pub async fn handle(
                         let req = fsocial_common::InfoRequest { url: url_match.url.clone() };
                         if let Ok(info) = nats.request_info(&req).await {
                             if info.is_playlist && !info.playlist_urls.is_empty() {
-                                let playlist_status = format!("⏳ Добавляю {} видео в очередь...", info.playlist_urls.len());
+                                let playlist_status = format!("⏳ Скачивание плейлиста: 0/{}\nПрогресс: 0%", info.playlist_urls.len());
                                 if let Err(_) = bot
                                     .edit_message_text(chat, msg.id(), playlist_status.clone())
                                     .reply_markup(teloxide::types::InlineKeyboardMarkup::default())
@@ -60,26 +60,19 @@ pub async fn handle(
                                         .await;
                                 }
 
-                                for p_url in info.playlist_urls {
-                                    if let Some(p_match) = url_parser::detect(&p_url) {
-                                        let status_msg = bot.send_message(chat, format!("⏳ В очереди: {}", p_url)).await?;
-                                        let mut task = DownloadTask::new(
-                                            p_match.url,
-                                            p_match.platform,
-                                            p_match.media_type,
-                                            quality.clone(),
-                                            chat_id,
-                                            message_id,
-                                            user_id,
-                                            false,
-                                        );
-                                        task.status_message_id = Some(status_msg.id.0);
-                                        let _ = nats.publish_task(&task).await;
-                                    }
-                                }
-                                if let Err(_) = bot.edit_message_text(chat, msg.id(), "✅ Плейлист добавлен в очередь!").await {
-                                    let _ = bot.edit_message_caption(chat, msg.id()).caption("✅ Плейлист добавлен в очередь!").await;
-                                }
+                                let mut task = DownloadTask::new(
+                                    url_match.url.clone(),
+                                    url_match.platform.clone(),
+                                    url_match.media_type.clone(),
+                                    quality.clone(),
+                                    chat_id,
+                                    message_id,
+                                    user_id,
+                                    false,
+                                );
+                                task.status_message_id = Some(msg.id().0);
+                                task.playlist_urls = Some(info.playlist_urls.clone());
+                                let _ = nats.publish_task(&task).await;
                                 return Ok(());
                             }
                         }

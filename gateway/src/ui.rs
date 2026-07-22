@@ -61,9 +61,14 @@ impl UiBuilder {
 
     pub fn build_quality_keyboard(info: &InfoResponse, short_id: &str) -> InlineKeyboardMarkup {
         if info.is_playlist {
+            let mut default_q = Quality::Video720p;
+            if info.available_qualities.iter().any(|q| q.quality.is_audio()) && 
+               !info.available_qualities.iter().any(|q| !q.quality.is_audio()) {
+                default_q = Quality::AudioBest;
+            }
             let btn = InlineKeyboardButton::callback(
                 format!("📥 Скачать плейлист ({})", info.playlist_count.unwrap_or(0)),
-                format!("{}|{}", Quality::Video720p.callback_id(), short_id),
+                format!("{}|{}", default_q.callback_id(), short_id),
             );
             return InlineKeyboardMarkup::new(vec![vec![btn]]);
         }

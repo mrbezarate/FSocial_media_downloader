@@ -158,6 +158,7 @@ pub struct DownloadTask {
     pub user_id: u64,
     pub is_group: bool,
     pub spotify_meta: Option<SpotifyTrackMeta>,
+    pub playlist_urls: Option<Vec<String>>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -185,6 +186,7 @@ impl DownloadTask {
             user_id,
             is_group,
             spotify_meta: None,
+            playlist_urls: None,
             created_at: Utc::now(),
         }
     }
@@ -212,12 +214,21 @@ pub enum TaskStatus {
         thumb_path: Option<String>,
         is_audio: bool,
     },
+    PlaylistCompleted {
+        files: Vec<(String, String, Option<u64>, Option<String>, bool)>, // path, title, duration, performer, is_audio
+        playlist_title: String,
+    },
     Failed {
         error: String,
         retryable: bool,
     },
     Progress {
         percent: u8,
+        status_text: String,
+    },
+    PlaylistProgress {
+        completed: u32,
+        total: u32,
         status_text: String,
     },
 }

@@ -110,6 +110,53 @@ async fn handle_result(bot: &Bot, res: TaskResult, config: &AppConfig) {
                 }
             }
         }
+        TaskStatus::PlaylistCompleted { files, playlist_title } => {
+            use teloxide::types::{InputMedia, InputMediaAudio, InputMediaVideo};
+            
+            // Chunk files into groups of 10
+            for chunk in files.chunks(10) {
+                let mut media_group = Vec::new();
+                for (file_path, title, duration_secs, performer, is_audio) in chunk {
+                    let path = PathBuf::from(file_path);
+                    let input_file = match tokio::fs::read(&path).await {
+                        Ok(data) => {
+                            let file_name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+                            InputFile::memory(data).file_name(file_name)
+                        },
+                        Err(_) => InputFile::file(path.clone())
+                    };
+
+                    if *is_audio {
+                        let mut audio = InputMediaAudio::new(input_file).title(title.clone());
+                        if let Some(perf) = performer {
+                            audio = audio.performer(perf.clone());
+                        }
+                        media_group.push(InputMedia::Audio(audio));
+                    } else {
+                        media_group.push(InputMedia::Video(InputMediaVideo::new(input_file).caption(title.clone())));
+                    }
+                }
+
+                if !media_group.is_empty() {
+                    let mut req = bot.send_media_group(chat_id, media_group);
+                    if let Some(reply_id) = res.reply_to_message_id {
+                        req = req.reply_parameters(teloxide::types::ReplyParameters::new(teloxide::types::MessageId(reply_id)));
+                    }
+                    if let Err(e) = req.await {
+                        error!("Failed to send media group: {}", e);
+                    }
+                }
+            }
+
+            if let Some(msg_id) = res.status_message_id {
+                let mid = teloxide::types::MessageId(msg_id);
+                let _ = bot.delete_message(chat_id, mid).await;
+            }
+
+            for (file_path, _, _, _, _) in files {
+                let _ = tokio::fs::remove_file(&file_path).await;
+            }
+        }
         TaskStatus::Failed { error, .. } => {
             if let Some(msg_id) = res.status_message_id {
                 let mid = teloxide::types::MessageId(msg_id);
@@ -124,18 +171,32 @@ async fn handle_result(bot: &Bot, res: TaskResult, config: &AppConfig) {
 }
 
 async fn handle_progress(bot: &Bot, res: TaskResult) {
-    if let TaskStatus::Progress { percent, status_text } = res.status {
-        if let Some(msg_id) = res.status_message_id {
-            let filled = (percent / 10) as usize;
-            let empty = 10 - filled;
-            let bar = format!("{}{}", "🟩".repeat(filled), "⬜".repeat(empty));
-            let text = format!("⏳ {}\n{} {}%", status_text, bar, percent);
+    match res.status {
+        TaskStatus::Progress { percent, status_text } => {
+            if let Some(msg_id) = res.status_message_id {
+                let filled = (percent / 10) as usize;
+                let empty = 10 - filled;
+                let bar = format!("{}{}", "🟩".repeat(filled), "⬜".repeat(empty));
+                let text = format!("⏳ {}\n{} {}%", status_text, bar, percent);
 
-            // We can't know if it's a photo or text easily here. 
-            // So we try both! 
-            if let Err(_) = bot.edit_message_text(teloxide::types::ChatId(res.chat_id), teloxide::types::MessageId(msg_id), text.clone()).await {
-                let _ = bot.edit_message_caption(teloxide::types::ChatId(res.chat_id), teloxide::types::MessageId(msg_id)).caption(text).await;
+                if let Err(_) = bot.edit_message_text(teloxide::types::ChatId(res.chat_id), teloxide::types::MessageId(msg_id), text.clone()).await {
+                    let _ = bot.edit_message_caption(teloxide::types::ChatId(res.chat_id), teloxide::types::MessageId(msg_id)).caption(text).await;
+                }
             }
-        }
+        },
+        TaskStatus::PlaylistProgress { completed, total, status_text } => {
+            if let Some(msg_id) = res.status_message_id {
+                let percent = if total > 0 { (completed as f32 / total as f32 * 100.0) as u8 } else { 0 };
+                let filled = (percent / 10) as usize;
+                let empty = 10 - filled;
+                let bar = format!("{}{}", "🟩".repeat(filled), "⬜".repeat(empty));
+                let text = format!("⏳ Скачивание плейлиста: {}/{}\n{}\n{} {}%", completed, total, status_text, bar, percent);
+
+                if let Err(_) = bot.edit_message_text(teloxide::types::ChatId(res.chat_id), teloxide::types::MessageId(msg_id), text.clone()).await {
+                    let _ = bot.edit_message_caption(teloxide::types::ChatId(res.chat_id), teloxide::types::MessageId(msg_id)).caption(text).await;
+                }
+            }
+        },
+        _ => {}
     }
 }

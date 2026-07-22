@@ -249,15 +249,117 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                 }
             });
 
-            let result = if task.platform == Platform::Spotify {
-                audio::process_spotify_task(&ctx_clone, &task, Some(tx)).await
+            let urls_to_process = if let Some(ref urls) = task.playlist_urls {
+                urls.clone()
             } else {
-                media::process_media_task(&ctx_clone, &task, Some(tx)).await
-                    .map(|(path, title, dur)| (path, title, dur, None))
+                vec![task.url.clone()]
             };
+            let total = urls_to_process.len();
+            let is_playlist_mode = total > 1;
+            
+            let mut completed_files = Vec::new();
+            let mut first_error = None;
 
-            match result {
-                Ok((file_path, title, duration_secs, performer)) => {
+            for (idx, url) in urls_to_process.iter().enumerate() {
+                if is_playlist_mode {
+                    let text = format!("⏳ Скачивание {}/{}", idx + 1, total);
+                    let res = TaskResult {
+                        task_id: task.task_id.clone(),
+                        chat_id: task.chat_id,
+                        status_message_id: task.status_message_id,
+                        reply_to_message_id: task.reply_to_message_id,
+                        is_group: task.is_group,
+                        status: TaskStatus::PlaylistProgress {
+                            completed: idx as u32,
+                            total: total as u32,
+                            status_text: text,
+                        },
+                    };
+                    publish_result(&ctx_clone.nats_jetstream, &res).await;
+                }
+
+                let mut current_task = task.clone();
+                current_task.url = url.clone();
+                // Clear metadata so spotify processes this single track correctly
+                current_task.spotify_meta = None;
+
+                let result = if current_task.platform == Platform::Spotify {
+                    audio::process_spotify_task(&ctx_clone, &current_task, Some(tx.clone())).await
+                } else {
+                    media::process_media_task(&ctx_clone, &current_task, Some(tx.clone())).await
+                        .map(|(path, title, dur)| (path, title, dur, None))
+                };
+
+                match result {
+                    Ok((file_path, title, duration_secs, performer)) => {
+                        completed_files.push((file_path, title, duration_secs, performer, current_task.quality.is_audio()));
+                    }
+                    Err(e) => {
+                        if first_error.is_none() {
+                            first_error = Some(e);
+                        }
+                        tracing::warn!("Task {} failed on url {}: {:?}", task.task_id, url, first_error);
+                        if !is_playlist_mode {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            drop(tx); // drop the original tx so the rx loop finishes
+
+            if is_playlist_mode {
+                if completed_files.is_empty() {
+                    let e = first_error.unwrap_or(fsocial_common::AppError::Download("Плейлист пуст или ошибка скачивания".into()));
+                    let res = TaskResult {
+                        task_id: task.task_id.clone(),
+                        chat_id: task.chat_id,
+                        status_message_id: task.status_message_id,
+                        reply_to_message_id: task.reply_to_message_id,
+                        is_group: task.is_group,
+                        status: TaskStatus::Failed {
+                            error: e.to_string(),
+                            retryable: e.is_retryable(),
+                        },
+                    };
+                    publish_result(&ctx_clone.nats_jetstream, &res).await;
+                    if !e.is_retryable() {
+                        let _ = msg.ack().await;
+                    }
+                } else {
+                    let res = TaskResult {
+                        task_id: task.task_id.clone(),
+                        chat_id: task.chat_id,
+                        status_message_id: task.status_message_id,
+                        reply_to_message_id: task.reply_to_message_id,
+                        is_group: task.is_group,
+                        status: TaskStatus::PlaylistCompleted {
+                            files: completed_files,
+                            playlist_title: "Плейлист".to_string(),
+                        },
+                    };
+                    publish_result(&ctx_clone.nats_jetstream, &res).await;
+                    let _ = msg.ack().await;
+                }
+            } else {
+                if let Some(e) = first_error {
+                    let res = TaskResult {
+                        task_id: task.task_id.clone(),
+                        chat_id: task.chat_id,
+                        status_message_id: task.status_message_id,
+                        reply_to_message_id: task.reply_to_message_id,
+                        is_group: task.is_group,
+                        status: TaskStatus::Failed {
+                            error: e.to_string(),
+                            retryable: e.is_retryable(),
+                        },
+                    };
+                    publish_result(&ctx_clone.nats_jetstream, &res).await;
+                    if !e.is_retryable() {
+                        let _ = msg.ack().await;
+                    }
+                } else if !completed_files.is_empty() {
+                    let (file_path, title, duration_secs, performer, is_audio) = completed_files.remove(0);
                     let res = TaskResult {
                         task_id: task.task_id.clone(),
                         chat_id: task.chat_id,
@@ -270,39 +372,11 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                             duration_secs,
                             performer,
                             thumb_path: None,
-                            is_audio: task.quality.is_audio(),
+                            is_audio,
                         },
                     };
                     publish_result(&ctx_clone.nats_jetstream, &res).await;
-                    if let Err(e) = msg.ack().await {
-                        error!("Failed to ack message: {:?}", e);
-                    }
-                }
-                Err(e) => {
-                    error!("Task {} failed: {:?}", task.task_id, e);
-                    let retryable = e.is_retryable();
-                    let res = TaskResult {
-                        task_id: task.task_id.clone(),
-                        chat_id: task.chat_id,
-                        status_message_id: task.status_message_id,
-                        reply_to_message_id: task.reply_to_message_id,
-                        is_group: task.is_group,
-                        status: TaskStatus::Failed {
-                            error: e.to_string(),
-                            retryable,
-                        },
-                    };
-                    publish_result(&ctx_clone.nats_jetstream, &res).await;
-
-                    if retryable {
-                        // Don't ack — JetStream will redeliver after ack timeout
-                        tracing::warn!("Task {} failed with retryable error, will be redelivered", task.task_id);
-                    } else {
-                        // Ack non-retryable errors to prevent infinite redelivery
-                        if let Err(e) = msg.ack().await {
-                            error!("Failed to ack unretryable message: {:?}", e);
-                        }
-                    }
+                    let _ = msg.ack().await;
                 }
             }
         });
