@@ -312,33 +312,48 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                     let _ = tx.send(fsocial_common::ProgressEvent::NewTrack(idx, total)).await;
                 }
                 
-                // ack_wait is set to 3600s so it won't redeliver
-
                 let mut current_task = task.clone();
                 current_task.url = url.clone();
                 // Clear metadata so spotify processes this single track correctly
                 current_task.spotify_meta = None;
 
-                let result = if current_task.platform == Platform::Spotify {
-                    audio::process_spotify_task(&ctx_clone, &current_task, Some(tx.clone())).await
-                } else {
-                    media::process_media_task(&ctx_clone, &current_task, Some(tx.clone())).await
-                        .map(|(path, title, dur)| (path, title, dur, None, None))
-                };
+                let mut attempts = 0;
+                let max_attempts = 5;
+                let mut track_success = false;
 
-                match result {
-                    Ok((file_path, title, duration_secs, performer, thumb_path)) => {
-                        completed_files.push((file_path, title, duration_secs, performer, thumb_path, current_task.quality.is_audio()));
-                    }
-                    Err(e) => {
-                        if first_error.is_none() {
-                            first_error = Some(e);
+                while attempts < max_attempts {
+                    attempts += 1;
+                    
+                    let result = if current_task.platform == Platform::Spotify {
+                        audio::process_spotify_task(&ctx_clone, &current_task, Some(tx.clone())).await
+                    } else {
+                        media::process_media_task(&ctx_clone, &current_task, Some(tx.clone())).await
+                            .map(|(path, title, dur)| (path, title, dur, None, None))
+                    };
+
+                    match result {
+                        Ok((file_path, title, duration_secs, performer, thumb_path)) => {
+                            completed_files.push((file_path, title, duration_secs, performer, thumb_path, current_task.quality.is_audio()));
+                            track_success = true;
+                            break; // Track downloaded successfully, break retry loop
                         }
-                        tracing::warn!("Task {} failed on url {}: {:?}", task.task_id, url, first_error);
-                        if !is_playlist_mode {
-                            break;
+                        Err(e) => {
+                            if attempts >= max_attempts {
+                                tracing::warn!("Task {} finally failed on url {} after {} attempts: {:?}", task.task_id, url, attempts, e);
+                                if first_error.is_none() {
+                                    first_error = Some(e);
+                                }
+                                break; // Give up on this track
+                            }
+                            
+                            tracing::warn!("Task {} failed on url {} (attempt {}/{}). Rate limit suspected. Waiting 15s... Error: {:?}", task.task_id, url, attempts, max_attempts, e);
+                            tokio::time::sleep(tokio::time::Duration::from_secs(15)).await;
                         }
                     }
+                }
+
+                if !track_success && !is_playlist_mode {
+                    break; // If single track failed, abort entirely
                 }
             }
 
