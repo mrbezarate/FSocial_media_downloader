@@ -53,6 +53,8 @@ pub async fn run(ctx: Arc<WorkerContext>) {
         .get_or_create_stream(async_nats::jetstream::stream::Config {
             name: subjects::STREAM_NAME.to_string(),
             subjects: vec![subjects::DOWNLOAD_TASKS.to_string()],
+            retention: async_nats::jetstream::stream::RetentionPolicy::WorkQueue,
+            max_age: std::time::Duration::from_secs(7200),
             ..Default::default()
         })
         .await
@@ -64,6 +66,7 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                     durable_name: Some(subjects::WORKER_GROUP.to_string()),
                     filter_subject: subjects::DOWNLOAD_TASKS.to_string(),
                     ack_wait: std::time::Duration::from_secs(3600),
+                    deliver_policy: async_nats::jetstream::consumer::DeliverPolicy::New,
                     ..Default::default()
                 },
             )

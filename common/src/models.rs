@@ -301,9 +301,9 @@ pub mod subjects {
     /// Subject for progress updates (Workers → Gateway)
     pub const TASK_PROGRESS: &str = "tasks.progress";
     /// JetStream stream name
-    pub const STREAM_NAME: &str = "DOWNLOADS_V3";
+    pub const STREAM_NAME: &str = "DOWNLOADS_V4";
     /// Consumer group name for workers
-    pub const WORKER_GROUP: &str = "media-workers-v2";
+    pub const WORKER_GROUP: &str = "media-workers-v4";
     /// Dead Letter Queue subject
     pub const DLQ: &str = "tasks.dlq";
     /// Subject for info requests (Gateway → Workers, request-reply)

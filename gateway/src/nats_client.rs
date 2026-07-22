@@ -22,6 +22,8 @@ impl NatsClient {
             .get_or_create_stream(Config {
                 name: subjects::STREAM_NAME.to_string(),
                 subjects: vec!["tasks.>".to_string()],
+                retention: async_nats::jetstream::stream::RetentionPolicy::WorkQueue,
+                max_age: std::time::Duration::from_secs(7200),
                 ..Default::default()
             })
             .await
