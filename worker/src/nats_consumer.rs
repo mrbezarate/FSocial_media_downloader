@@ -248,7 +248,7 @@ pub async fn run(ctx: Arc<WorkerContext>) {
             }
 
             tokio::spawn(async move {
-                let mut last_percent = 0;
+                let mut last_update = tokio::time::Instant::now() - tokio::time::Duration::from_secs(10);
                 let mut current_idx = 0;
                 let mut total_tracks = 1;
 
@@ -257,15 +257,15 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                         fsocial_common::ProgressEvent::NewTrack(idx, total) => {
                             current_idx = idx;
                             total_tracks = total;
-                            last_percent = 0; // reset for new track
                         }
                         fsocial_common::ProgressEvent::Line(line) => {
                             if let Some(caps) = re.captures(&line) {
                                 if let (Some(p), Some(_size)) = (caps.name("percent"), caps.name("size")) {
                                     if let Ok(percent) = p.as_str().parse::<f32>() {
                                         let pct = percent as u8;
-                                        if pct >= last_percent + 10 || pct == 100 {
-                                            last_percent = pct;
+                                        
+                                        if last_update.elapsed().as_secs_f32() >= 1.5 || pct == 100 {
+                                            last_update = tokio::time::Instant::now();
                                             let eta = caps.name("eta").map_or("?", |m| m.as_str());
                                             
                                             let mut text = format!("Скачивание: {}%", pct);
@@ -273,7 +273,9 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                                                 text = format!("{} | Осталось: {}", text, formatted_eta);
                                             }
 
-                                            // Removed playlist prefix per user request
+                                            if is_playlist_mode_prog {
+                                                text = format!("Скачивание плейлиста: {}/{}\n⏳ {}", current_idx + 1, total_tracks, text);
+                                            }
 
                                             publish_progress(
                                                 &ctx_prog.nats_jetstream,
