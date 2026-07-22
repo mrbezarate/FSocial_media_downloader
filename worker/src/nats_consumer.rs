@@ -108,6 +108,7 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                                 error: None,
                             })
                         } else if req.url.contains("soundcloud.com") {
+                            let is_sc_playlist = req.url.split('?').next().unwrap_or(&req.url).contains("/sets/");
                             Ok(fsocial_common::InfoResponse {
                                 title: "SoundCloud Audio".to_string(),
                                 uploader: Some("SoundCloud".to_string()),
@@ -121,7 +122,7 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                                     display_label: "🎵 MP3".to_string(),
                                     full_button_label: "🎵 MP3".to_string(),
                                 }],
-                                is_playlist: req.url.contains("/sets/"),
+                                is_playlist: is_sc_playlist,
                                 playlist_count: None,
                                 playlist_urls: vec![],
                                 error: None,
