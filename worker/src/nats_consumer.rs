@@ -16,15 +16,15 @@ pub struct WorkerContext {
     pub proxy_pool: media::proxy::ProxyPool,
 }
 
-pub async fn publish_result(js: &jetstream::Context, result: &TaskResult) {
+pub async fn publish_result(client: &async_nats::Client, result: &TaskResult) {
     let payload = serde_json::to_vec(result).unwrap();
-    if let Err(e) = js.publish(subjects::TASK_RESULTS.to_string(), payload.into()).await {
+    if let Err(e) = client.publish(subjects::TASK_RESULTS.to_string(), payload.into()).await {
         error!("Failed to publish TaskResult: {:?}", e);
     }
 }
 
 pub async fn publish_progress(
-    js: &jetstream::Context,
+    client: &async_nats::Client,
     task_id: &str,
     chat_id: i64,
     status_message_id: Option<i32>,
@@ -43,7 +43,7 @@ pub async fn publish_progress(
         },
     };
     let payload = serde_json::to_vec(&res).unwrap();
-    if let Err(e) = js.publish(fsocial_common::subjects::TASK_PROGRESS.to_string(), payload.into()).await {
+    if let Err(e) = client.publish(fsocial_common::subjects::TASK_PROGRESS.to_string(), payload.into()).await {
         tracing::error!("Failed to publish TaskProgress: {:?}", e);
     }
 }
@@ -214,7 +214,7 @@ pub async fn run(ctx: Arc<WorkerContext>) {
             info!("Processing task: {}", task.task_id);
 
             publish_progress(
-                &ctx_clone.nats_jetstream,
+                &ctx_clone.nats_client,
                 &task.task_id,
                 task.chat_id,
                 task.status_message_id,
@@ -281,7 +281,7 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                                             }
 
                                             publish_progress(
-                                                &ctx_prog.nats_jetstream,
+                                                &ctx_prog.nats_client,
                                                 &task_id_prog,
                                                 chat_id_prog,
                                                 status_msg_id_prog,
@@ -359,7 +359,7 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                             retryable: e.is_retryable(),
                         },
                     };
-                    publish_result(&ctx_clone.nats_jetstream, &res).await;
+                    publish_result(&ctx_clone.nats_client, &res).await;
                     if !e.is_retryable() {
                         let _ = msg.ack().await;
                     }
@@ -377,7 +377,7 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                             failed_count: (total - completed_files_len) as u32,
                         },
                     };
-                    publish_result(&ctx_clone.nats_jetstream, &res).await;
+                    publish_result(&ctx_clone.nats_client, &res).await;
                     let _ = msg.ack().await;
                 }
             } else {
@@ -393,7 +393,7 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                             retryable: e.is_retryable(),
                         },
                     };
-                    publish_result(&ctx_clone.nats_jetstream, &res).await;
+                    publish_result(&ctx_clone.nats_client, &res).await;
                     if !e.is_retryable() {
                         let _ = msg.ack().await;
                     }
@@ -414,7 +414,7 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                             is_audio,
                         },
                     };
-                    publish_result(&ctx_clone.nats_jetstream, &res).await;
+                    publish_result(&ctx_clone.nats_client, &res).await;
                     let _ = msg.ack().await;
                 }
             }

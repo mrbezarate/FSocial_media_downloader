@@ -294,19 +294,19 @@ pub struct InfoResponse {
 // ─── NATS Subjects ───────────────────────────────────────────────────────────
 
 pub mod subjects {
-    /// Subject to publish new download tasks
-    pub const DOWNLOAD_TASKS: &str = "tasks.download.v2";
-    /// Subject for completed/failed results (Workers → Gateway)
+    /// Subject to publish new download tasks (Gateway → Workers, via JetStream)
+    pub const DOWNLOAD_TASKS: &str = "tasks.download";
+    /// Subject for completed/failed results (Workers → Gateway, plain NATS pub/sub)
     pub const TASK_RESULTS: &str = "tasks.result";
-    /// Subject for progress updates (Workers → Gateway)
+    /// Subject for progress updates (Workers → Gateway, plain NATS pub/sub)
     pub const TASK_PROGRESS: &str = "tasks.progress";
-    /// JetStream stream name
-    pub const STREAM_NAME: &str = "DOWNLOADS_V4";
+    /// JetStream stream name — ONLY captures DOWNLOAD_TASKS subject
+    pub const STREAM_NAME: &str = "DOWNLOAD_QUEUE";
     /// Consumer group name for workers
-    pub const WORKER_GROUP: &str = "media-workers-v4";
+    pub const WORKER_GROUP: &str = "download-workers";
     /// Dead Letter Queue subject
     pub const DLQ: &str = "tasks.dlq";
-    /// Subject for info requests (Gateway → Workers, request-reply)
+    /// Subject for info requests (Gateway → Workers, request-reply via plain NATS)
     pub const INFO_REQUEST: &str = "tasks.info";
 }
 
