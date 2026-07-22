@@ -198,10 +198,7 @@ async fn handle_progress(bot: &Bot, res: TaskResult) {
     match res.status {
         TaskStatus::Progress { percent, status_text } => {
             if let Some(msg_id) = res.status_message_id {
-                let filled = (percent / 10) as usize;
-                let empty = 10 - filled;
-                let bar = format!("{}{}", "🟩".repeat(filled), "⬜".repeat(empty));
-                let text = format!("⏳ {}\n{} {}%", status_text, bar, percent);
+                let text = format!("⏳ {} {}%", status_text, percent);
 
                 if let Err(_) = bot.edit_message_text(teloxide::types::ChatId(res.chat_id), teloxide::types::MessageId(msg_id), text.clone()).await {
                     let _ = bot.edit_message_caption(teloxide::types::ChatId(res.chat_id), teloxide::types::MessageId(msg_id)).caption(text).await;
@@ -210,11 +207,7 @@ async fn handle_progress(bot: &Bot, res: TaskResult) {
         },
         TaskStatus::PlaylistProgress { completed, total, status_text } => {
             if let Some(msg_id) = res.status_message_id {
-                let percent = if total > 0 { (completed as f32 / total as f32 * 100.0) as u8 } else { 0 };
-                let filled = (percent / 10) as usize;
-                let empty = 10 - filled;
-                let bar = format!("{}{}", "🟩".repeat(filled), "⬜".repeat(empty));
-                let text = format!("⏳ Скачивание плейлиста: {}/{}\n{}\n{} {}%", completed, total, status_text, bar, percent);
+                let text = format!("⏳ Скачивание плейлиста: {}/{}\n{}", completed, total, status_text);
 
                 if let Err(_) = bot.edit_message_text(teloxide::types::ChatId(res.chat_id), teloxide::types::MessageId(msg_id), text.clone()).await {
                     let _ = bot.edit_message_caption(teloxide::types::ChatId(res.chat_id), teloxide::types::MessageId(msg_id)).caption(text).await;
