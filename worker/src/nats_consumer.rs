@@ -273,9 +273,7 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                                                 text = format!("{} | Осталось: {}", text, formatted_eta);
                                             }
 
-                                            if is_playlist_mode_prog {
-                                                text = format!("Скачивание плейлиста: {}/{}\n⏳ {}", current_idx + 1, total_tracks, text);
-                                            }
+                                            // Removed playlist prefix per user request
 
                                             publish_progress(
                                                 &ctx_prog.nats_jetstream,
@@ -307,23 +305,6 @@ pub async fn run(ctx: Arc<WorkerContext>) {
 
             for (idx, url) in urls_to_process.iter().enumerate() {
                 if is_playlist_mode {
-                    let text = format!("⏳ Скачивание {}/{}", idx + 1, total);
-                    let res = TaskResult {
-                        task_id: task.task_id.clone(),
-                        chat_id: task.chat_id,
-                        status_message_id: task.status_message_id,
-                        reply_to_message_id: task.reply_to_message_id,
-                        is_group: task.is_group,
-                        status: TaskStatus::PlaylistProgress {
-                            completed: idx as u32,
-                            total: total as u32,
-                            status_text: text,
-                        },
-                    };
-                    let payload = serde_json::to_vec(&res).unwrap();
-                    if let Err(e) = ctx_clone.nats_jetstream.publish(fsocial_common::subjects::TASK_PROGRESS.to_string(), payload.into()).await {
-                        tracing::error!("Failed to publish PlaylistProgress: {:?}", e);
-                    }
                     let _ = tx.send(fsocial_common::ProgressEvent::NewTrack(idx, total)).await;
                 }
                 
