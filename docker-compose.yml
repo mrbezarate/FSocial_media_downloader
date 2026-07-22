@@ -1,0 +1,162 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# FSocial Media Downloader — High-Load Multimedia Telegram Gateway
+# Docker Compose Orchestration
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Architecture:
+#   telegram-bot-api ←→ gateway ←→ NATS JetStream ←→ worker(s)
+#                                                       ↓
+#                                               shared_data volume (Zero-Copy)
+#
+# Usage:
+#   docker compose up -d                    # Start all services
+#   docker compose up -d --scale worker=4   # Scale to 4 workers
+#   docker compose logs -f gateway worker   # Follow logs
+# ═══════════════════════════════════════════════════════════════════════════════
+
+services:
+
+  # ─── Telegram Bot API Server (Local) ──────────────────────────────────────
+  # Needed for sending files > 50MB (up to 2GB)
+  telegram-bot-api:
+    image: aiogram/telegram-bot-api:latest
+    container_name: fsocial-bot-api
+    restart: unless-stopped
+    environment:
+      TELEGRAM_API_ID: "${TELEGRAM_API_ID}"
+      TELEGRAM_API_HASH: "${TELEGRAM_API_HASH}"
+      TELEGRAM_STAT: 1
+      TELEGRAM_LOCAL: 1
+    volumes:
+      - telegram_data:/var/lib/telegram-bot-api
+      - shared_data:/shared_data
+    ports:
+      - "8081:8081"
+
+  # ─── NATS JetStream — Message Broker ──────────────────────────────────────
+  # Lightweight, high-performance message broker
+  # Queue Groups for load balancing across workers
+  nats:
+    image: nats:2-alpine
+    container_name: fsocial-nats
+    restart: unless-stopped
+    command: ["--config", "/etc/nats/nats-server.conf"]
+    volumes:
+      - ./nats-server.conf:/etc/nats/nats-server.conf:ro
+      - nats_data:/data
+    ports:
+      - "4222:4222"   # Client connections
+      - "8222:8222"   # HTTP monitoring
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8222/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  # ─── Redis — FSM State + L2 Cache ────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: fsocial-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ─── PostgreSQL — User Profiles & Statistics ──────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: fsocial-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: fsocial
+      POSTGRES_USER: fsocial
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-fsocial_secret}"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fsocial -d fsocial"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ─── Telegram Gateway (Rust) ──────────────────────────────────────────────
+  # Lightweight: handles commands, routing, FSM, publishes tasks to NATS
+  # Listens for results from NATS and sends files to Telegram
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
+    container_name: fsocial-gateway
+    restart: unless-stopped
+    environment:
+      TELOXIDE_TOKEN: "${TELOXIDE_TOKEN}"
+      TELEGRAM_API_URL: "http://telegram-bot-api:8081"
+      NATS_URL: "nats://nats:4222"
+      REDIS_URL: "redis://redis:6379"
+      DATABASE_URL: "postgres://fsocial:${POSTGRES_PASSWORD:-fsocial_secret}@postgres:5432/fsocial"
+      SHARED_DATA_PATH: "/shared_data"
+      RUST_LOG: "${RUST_LOG:-info}"
+    volumes:
+      - shared_data:/shared_data
+    depends_on:
+      telegram-bot-api:
+        condition: service_started
+      nats:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  # ─── Media/Audio Worker (Rust + yt-dlp + ffmpeg) ──────────────────────────
+  # Scalable: docker compose up --scale worker=N
+  # Downloads media, applies tags, saves to shared_data for Zero-Copy
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    restart: unless-stopped
+    environment:
+      TELOXIDE_TOKEN: "${TELOXIDE_TOKEN}"
+      NATS_URL: "nats://nats:4222"
+      REDIS_URL: "redis://redis:6379"
+      DATABASE_URL: "postgres://fsocial:${POSTGRES_PASSWORD:-fsocial_secret}@postgres:5432/fsocial"
+      SHARED_DATA_PATH: "/shared_data"
+      SPOTIFY_CLIENT_ID: "${SPOTIFY_CLIENT_ID:-}"
+      SPOTIFY_CLIENT_SECRET: "${SPOTIFY_CLIENT_SECRET:-}"
+      PROXY_LIST: "${PROXY_LIST:-}"
+      COOKIES_PATH: "${COOKIES_PATH:-}"
+      MAX_CONCURRENT_DOWNLOADS: "${MAX_CONCURRENT_DOWNLOADS:-10}"
+      RUST_LOG: "${RUST_LOG:-info}"
+    volumes:
+      - shared_data:/shared_data
+      - ./cookies.txt:/app/cookies.txt:ro
+    depends_on:
+      nats:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+# ─── Named Volumes ─────────────────────────────────────────────────────────
+volumes:
+  telegram_data:
+    driver: local
+  shared_data:
+    driver: local
+  nats_data:
+    driver: local
+  redis_data:
+    driver: local
+  pg_data:
+    driver: local

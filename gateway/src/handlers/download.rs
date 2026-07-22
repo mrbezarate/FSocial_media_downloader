@@ -1,0 +1,132 @@
+use fsocial_common::{AppConfig, DownloadTask};
+use teloxide::prelude::*;
+
+use crate::{nats_client::NatsClient, url_parser, UrlCache};
+
+const SUPPORTED_SOURCES_INFO: &str = "\
+❌ <b>Ошибка: Ссылка недействительна или источник не поддерживается!</b>\n\n\
+Пожалуйста, отправляйте только рабочие ссылки со следующих поддерживаемых сервисов:\n\n\
+🎬 <b>Видео сервисы:</b>\n\
+• <b>YouTube</b> (Видео, Shorts)\n\
+• <b>Instagram</b> (Reels, Посты)\n\
+• <b>TikTok</b>\n\
+• <b>Pinterest</b>\n\n\
+🎵 <b>Аудио сервисы:</b>\n\
+• <b>Spotify</b> (Треки, Альбомы, Плейлисты)\n\
+• <b>SoundCloud</b>";
+
+pub async fn handle(
+    bot: Bot,
+    msg: Message,
+    nats: NatsClient,
+    config: AppConfig,
+    url_cache: UrlCache,
+) -> ResponseResult<()> {
+    let text = if let Some(t) = msg.text().or(msg.caption()) {
+        t
+    } else {
+        return Ok(());
+    };
+
+    let url_match = if let Some(m) = url_parser::detect(text) {
+        m
+    } else {
+        // Deletes the user's message containing unsupported/invalid link
+        let _ = bot.delete_message(msg.chat.id, msg.id).await;
+        let _ = bot
+            .send_message(msg.chat.id, SUPPORTED_SOURCES_INFO)
+            .parse_mode(teloxide::types::ParseMode::Html)
+            .await;
+        return Ok(());
+    };
+
+    let is_group = msg.chat.is_group() || msg.chat.is_supergroup();
+    let user_id = msg.from.as_ref().map(|u| u.id.0).unwrap_or(0);
+    let chat_id = msg.chat.id.0;
+    let message_id = msg.id.0;
+
+    if is_group {
+        let default_quality = if url_match.media_type == fsocial_common::MediaType::Audio {
+            config.default_audio_quality.clone()
+        } else {
+            config.default_video_quality.clone()
+        };
+
+        let mut task = DownloadTask::new(
+            url_match.url,
+            url_match.platform,
+            url_match.media_type,
+            default_quality,
+            chat_id,
+            message_id,
+            user_id,
+            true,
+        );
+        task.reply_to_message_id = Some(message_id);
+
+        let status_msg = bot
+            .send_message(msg.chat.id, "⏳ Загружаю...")
+            .reply_parameters(teloxide::types::ReplyParameters::new(msg.id))
+            .await?;
+
+        task.status_message_id = Some(status_msg.id.0);
+
+        if let Err(e) = nats.publish_task(&task).await {
+            tracing::error!("Failed to publish task: {}", e);
+            bot.edit_message_text(msg.chat.id, status_msg.id, "❌ Внутренняя ошибка")
+                .await?;
+        }
+    } else {
+        let req = fsocial_common::InfoRequest { url: url_match.url.clone() };
+        let short_id = uuid::Uuid::new_v4().to_string()[..8].to_string();
+        url_cache.lock().await.insert(short_id.clone(), url_match.url.clone());
+
+        match nats.request_info(&req).await {
+            Ok(info) => {
+                let text = crate::ui::UiBuilder::build_info_message(&info);
+                let keyboard = crate::ui::UiBuilder::build_quality_keyboard(&info, &short_id);
+
+                let mut sent_photo = false;
+                if let Some(thumb_url) = info.thumbnail {
+                    if let Ok(url) = reqwest::Url::parse(&thumb_url) {
+                        let res = bot
+                            .send_photo(msg.chat.id, teloxide::types::InputFile::url(url))
+                            .caption(text.clone())
+                            .parse_mode(teloxide::types::ParseMode::Html)
+                            .reply_markup(keyboard.clone())
+                            .reply_parameters(teloxide::types::ReplyParameters::new(msg.id))
+                            .await;
+                        if res.is_ok() {
+                            sent_photo = true;
+                        }
+                    }
+                }
+
+                if !sent_photo {
+                    let _ = bot
+                        .send_message(msg.chat.id, text)
+                        .parse_mode(teloxide::types::ParseMode::Html)
+                        .reply_markup(keyboard)
+                        .reply_parameters(teloxide::types::ReplyParameters::new(msg.id))
+                        .await;
+                }
+
+                return Ok(());
+            }
+            Err(e) => {
+                // Link is broken, private or invalid -> delete user's message and inform
+                let _ = bot.delete_message(msg.chat.id, msg.id).await;
+                let err_msg = format!(
+                    "❌ <b>Не удалось обработать ссылку!</b>\n<i>Причина: {}</i>\n\n{}",
+                    e, SUPPORTED_SOURCES_INFO
+                );
+                let _ = bot
+                    .send_message(msg.chat.id, err_msg)
+                    .parse_mode(teloxide::types::ParseMode::Html)
+                    .await;
+            }
+        }
+    }
+
+    Ok(())
+}

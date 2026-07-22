@@ -1,0 +1,73 @@
+use fsocial_common::{AppError, SpotifyTrackMeta};
+use reqwest::Client;
+use lofty::config::WriteOptions;
+use lofty::file::TaggedFileExt;
+use lofty::tag::{TagExt, ItemKey, Accessor};
+use lofty::picture::{Picture, PictureType, MimeType};
+
+pub async fn download_cover(url: &str) -> Result<Vec<u8>, AppError> {
+    let client = Client::new();
+    let res = client.get(url).send().await.map_err(|e| AppError::Http(e.to_string()))?;
+    if !res.status().is_success() {
+        return Err(AppError::Http(format!("Failed to download cover: {}", res.status())));
+    }
+    let bytes = res.bytes().await.map_err(|e| AppError::Http(e.to_string()))?;
+    Ok(bytes.to_vec())
+}
+
+pub async fn apply_tags(file_path: &str, meta: &SpotifyTrackMeta, cover_data: Option<Vec<u8>>) -> Result<(), AppError> {
+    let file_path = file_path.to_string();
+    let meta = meta.clone();
+
+    // lofty operations are synchronous — run in blocking task
+    tokio::task::spawn_blocking(move || {
+        let mut tagged_file = lofty::read_from_path(&file_path)
+            .map_err(|e| AppError::Tagging(e.to_string()))?;
+
+        let tag_type = tagged_file.primary_tag_type();
+        let tag = match tagged_file.primary_tag_mut() {
+            Some(t) => t,
+            None => {
+                if let Some(t) = tagged_file.first_tag_mut() {
+                    t
+                } else {
+                    tagged_file.insert_tag(lofty::tag::Tag::new(tag_type));
+                    tagged_file.primary_tag_mut().unwrap()
+                }
+            }
+        };
+
+        tag.set_title(meta.title.clone());
+        tag.set_artist(meta.artists.join(", "));
+        tag.set_album(meta.album.clone());
+
+        if let Some(y) = meta.year {
+            tag.insert_text(ItemKey::Year, y.to_string());
+        }
+        if let Some(t) = meta.track_number {
+            tag.set_track(t);
+        }
+        if !meta.genres.is_empty() {
+            tag.set_genre(meta.genres.join(", "));
+        }
+
+        if let Some(cover) = cover_data {
+            let pic = Picture::new_unchecked(
+                PictureType::CoverFront,
+                Some(MimeType::Jpeg),
+                None,
+                cover,
+            );
+            tag.push_picture(pic);
+        }
+
+        tag.save_to_path(&file_path, WriteOptions::default())
+            .map_err(|e| AppError::Tagging(e.to_string()))?;
+
+        Ok::<(), AppError>(())
+    })
+    .await
+    .map_err(|e| AppError::Tagging(format!("Blocking task failed: {}", e)))??;
+
+    Ok(())
+}

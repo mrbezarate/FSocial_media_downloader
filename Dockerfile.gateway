@@ -1,0 +1,59 @@
+# ─── Stage 1: Build ──────────────────────────────────────────────────────────
+FROM rust:slim-bookworm AS builder
+
+WORKDIR /app
+
+# System dependencies for building
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Cache dependencies: copy manifests first
+COPY Cargo.toml Cargo.toml
+COPY common/Cargo.toml common/Cargo.toml
+COPY gateway/Cargo.toml gateway/Cargo.toml
+
+# Create dummy workspace member dirs so cargo resolves the workspace
+RUN mkdir -p common/src && echo "pub fn dummy() {}" > common/src/lib.rs
+RUN mkdir -p gateway/src && echo "fn main() {}" > gateway/src/main.rs
+# Worker is a workspace member but we don't need to build it
+RUN mkdir -p worker/src && echo "fn main() {}" > worker/src/main.rs
+COPY worker/Cargo.toml worker/Cargo.toml
+
+# Build only dependencies (cached layer)
+RUN cargo build --release --package fsocial-gateway 2>/dev/null || true
+RUN rm -rf common/src gateway/src
+
+# Copy real source code
+COPY common/ common/
+COPY gateway/ gateway/
+
+# Touch main.rs to force rebuild of our code (not dependencies)
+RUN touch common/src/lib.rs gateway/src/main.rs
+RUN cargo build --release --package fsocial-gateway
+
+# ─── Stage 2: Runtime ────────────────────────────────────────────────────────
+FROM debian:bookworm-slim AS runtime
+
+WORKDIR /app
+
+# Minimal runtime dependencies
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create shared data directory
+RUN mkdir -p /shared_data
+
+# Copy compiled binary
+COPY --from=builder /app/target/release/fsocial-gateway /app/gateway
+
+# Run as non-root user
+RUN useradd -m botuser && chown -R botuser:botuser /app /shared_data
+USER botuser
+
+ENV RUST_LOG=info
+
+CMD ["/app/gateway"]

@@ -1,0 +1,8 @@
+/target
+**/target
+.env
+*.env.local
+downloads/
+shared_data/
+cookies.txt
+*.log
