@@ -124,7 +124,7 @@ async fn handle_result(bot: &Bot, res: TaskResult, config: &AppConfig) {
                 }
             }
         }
-        TaskStatus::PlaylistCompleted { files, playlist_title } => {
+        TaskStatus::PlaylistCompleted { files, playlist_title, failed_count } => {
             use teloxide::types::{InputMedia, InputMediaAudio, InputMediaVideo};
             
             // Chunk files into groups of 10
@@ -167,6 +167,11 @@ async fn handle_result(bot: &Bot, res: TaskResult, config: &AppConfig) {
                         error!("Failed to send media group: {}", e);
                     }
                 }
+            }
+
+            if failed_count > 0 {
+                let msg = format!("⚠️ Не удалось скачать {} треков из-за ограничений Spotify/SoundCloud.", failed_count);
+                let _ = bot.send_message(chat_id, msg).await;
             }
 
             if let Some(msg_id) = res.status_message_id {

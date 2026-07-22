@@ -217,6 +217,7 @@ pub enum TaskStatus {
     PlaylistCompleted {
         files: Vec<(String, String, Option<u64>, Option<String>, Option<String>, bool)>, // path, title, duration, performer, thumb_path, is_audio
         playlist_title: String,
+        failed_count: u32,
     },
     Failed {
         error: String,
@@ -302,7 +303,7 @@ pub mod subjects {
     /// JetStream stream name
     pub const STREAM_NAME: &str = "DOWNLOADS";
     /// Consumer group name for workers
-    pub const WORKER_GROUP: &str = "media-workers";
+    pub const WORKER_GROUP: &str = "media-workers-v2";
     /// Dead Letter Queue subject
     pub const DLQ: &str = "tasks.dlq";
     /// Subject for info requests (Gateway → Workers, request-reply)

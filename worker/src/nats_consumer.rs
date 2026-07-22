@@ -361,6 +361,7 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                         let _ = msg.ack().await;
                     }
                 } else {
+                    let completed_files_len = completed_files.len();
                     let res = TaskResult {
                         task_id: task.task_id.clone(),
                         chat_id: task.chat_id,
@@ -370,6 +371,7 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                         status: TaskStatus::PlaylistCompleted {
                             files: completed_files,
                             playlist_title: "Плейлист".to_string(),
+                            failed_count: (total - completed_files_len) as u32,
                         },
                     };
                     publish_result(&ctx_clone.nats_jetstream, &res).await;
