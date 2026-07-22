@@ -4,14 +4,30 @@ use tokio::process::Command;
 use serde_json::Value;
 use tracing::info;
 
-pub async fn find_on_youtube(config: &AppConfig, meta: &SpotifyTrackMeta, proxy: Option<&str>) -> Result<String, AppError> {
+pub async fn find_track_url(config: &AppConfig, meta: &SpotifyTrackMeta, proxy: Option<&str>) -> Result<String, AppError> {
     let query = meta.youtube_search_query();
-    info!("Searching YouTube for: {}", query);
+    info!("Searching platforms for: {}", query);
 
+    // Try YouTube first
+    if let Ok(url) = search_platform(config, &query, "ytsearch1", proxy).await {
+        return Ok(url);
+    }
+    
+    tracing::warn!("YouTube search failed for {}. Falling back to SoundCloud...", query);
+
+    // Fallback to SoundCloud
+    if let Ok(url) = search_platform(config, &query, "scsearch1", proxy).await {
+        return Ok(url);
+    }
+
+    Err(AppError::Download("Could not find track on YouTube or SoundCloud".into()))
+}
+
+async fn search_platform(config: &AppConfig, query: &str, search_prefix: &str, proxy: Option<&str>) -> Result<String, AppError> {
     let mut cmd = Command::new(&config.ytdlp_path);
     cmd.arg("--dump-json")
        .arg("--no-download")
-       .arg("--default-search").arg("ytsearch1");
+       .arg("--default-search").arg(search_prefix);
        
     if let Some(p) = proxy {
         cmd.arg("--proxy").arg(p);
@@ -21,7 +37,7 @@ pub async fn find_on_youtube(config: &AppConfig, meta: &SpotifyTrackMeta, proxy:
         cmd.arg("--cookies").arg(cookies);
     }
 
-    cmd.arg(&query);
+    cmd.arg(query);
 
     let output = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).output().await?;
 
@@ -37,14 +53,15 @@ pub async fn find_on_youtube(config: &AppConfig, meta: &SpotifyTrackMeta, proxy:
     let first_line = stdout.lines().next().unwrap_or_default();
     
     if first_line.is_empty() {
-        return Err(AppError::Download("YouTube search returned empty output. Rate limit or IP ban suspected.".into()));
+        return Err(AppError::Download(format!("{} search returned empty output. Rate limit or IP ban suspected.", search_prefix)));
     }
     
     let json: Value = serde_json::from_str(first_line)?;
 
     let url = json.get("webpage_url")
+        .or_else(|| json.get("url"))
         .and_then(|v| v.as_str())
-        .ok_or_else(|| AppError::Download("Failed to get webpage_url from search result".into()))?
+        .ok_or_else(|| AppError::Download(format!("Failed to get URL from {} search result", search_prefix)))?
         .to_string();
 
     Ok(url)

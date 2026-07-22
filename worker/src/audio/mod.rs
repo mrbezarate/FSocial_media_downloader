@@ -35,9 +35,9 @@ pub async fn process_spotify_task(
         attempts += 1;
         let proxy = ctx.proxy_pool.next();
         
-        match matcher::find_on_youtube(&ctx.config, &meta, proxy).await {
+        match matcher::find_track_url(&ctx.config, &meta, proxy).await {
             Ok(yt_url) => {
-                info!("Matched Spotify track to YouTube URL: {}", yt_url);
+                info!("Matched Spotify track to platform URL: {}", yt_url);
                 
                 match ytdlp::download(
                     &ctx.config,
