@@ -12,7 +12,7 @@ pub struct UrlMatch {
 static URL_PATTERNS: LazyLock<Vec<(Regex, Platform, MediaType)>> = LazyLock::new(|| {
     vec![
         (Regex::new(r"https?://(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/shorts/|youtube\.com/live/|youtube\.com/playlist\?list=)[^\s]+").unwrap(), Platform::YouTube, MediaType::Video),
-        (Regex::new(r"https?://(?:www\.)?(?:tiktok\.com/@[^/]+/video/|vm\.tiktok\.com/)[^\s]+").unwrap(), Platform::TikTok, MediaType::Video),
+        (Regex::new(r"https?://(?:www\.)?(?:tiktok\.com/@[^/]+/video/|tiktok\.com/t/|vm\.tiktok\.com/|vt\.tiktok\.com/|v\.tiktok\.com/)[^\s]+").unwrap(), Platform::TikTok, MediaType::Video),
         (Regex::new(r"https?://(?:www\.)?instagram\.com/(?:reel|p)/[^\s]+").unwrap(), Platform::Instagram, MediaType::Video),
         (Regex::new(r"https?://(?:open\.)?spotify\.com/track/[^\s]+").unwrap(), Platform::Spotify, MediaType::Audio),
         (Regex::new(r"https?://(?:open\.)?spotify\.com/(?:album|playlist)/[^\s]+").unwrap(), Platform::Spotify, MediaType::Playlist),
