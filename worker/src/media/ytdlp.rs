@@ -10,6 +10,7 @@ pub struct YtDlpOutput {
     pub title: String,
     pub duration: Option<u64>,
     pub thumbnail: Option<String>,
+    pub uploader: Option<String>,
 }
 
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -85,6 +86,54 @@ pub async fn download(
     if !status.success() {
         let stderr = error_log.lock().await.clone();
         error!("yt-dlp error: {}", stderr);
+        
+        if stderr.contains("No video formats found") && url.contains("pin") {
+            let client = reqwest::Client::new();
+            if let Ok(resp) = client.get(url).send().await {
+                if let Ok(html) = resp.text().await {
+                    let og_re = regex::Regex::new(r#"<meta(?:[^>]+)og:image(?:[^>]+)>"#).unwrap();
+                    let content_re = regex::Regex::new(r#"content="([^"]+)""#).unwrap();
+                    
+                    let mut img_url_opt = None;
+                    if let Some(mat) = og_re.find(&html) {
+                        let tag = mat.as_str();
+                        if let Some(caps) = content_re.captures(tag) {
+                            let url_str = caps.get(1).unwrap().as_str();
+                            img_url_opt = Some(url_str.replace("/736x/", "/originals/")
+                                .replace("/474x/", "/originals/")
+                                .replace("/236x/", "/originals/"));
+                        }
+                    } else {
+                        // Fallback to JSON schema "image":"..."
+                        let json_re = regex::Regex::new(r#""image":"(https://i\.pinimg\.com/[^"]+)""#).unwrap();
+                        if let Some(caps) = json_re.captures(&html) {
+                            img_url_opt = Some(caps.get(1).unwrap().as_str().to_string());
+                        }
+                    }
+
+                    if let Some(img_url) = img_url_opt {
+                        let ext = img_url.split('.').last().unwrap_or("png");
+                        let file_path = format!("{}/{}.{}", output_dir, uuid, ext);
+                        
+                        if let Ok(img_resp) = client.get(&img_url).send().await {
+                            if let Ok(bytes) = img_resp.bytes().await {
+                                if tokio::fs::write(&file_path, &bytes).await.is_ok() {
+                                    return Ok(YtDlpOutput {
+                                        file_path,
+                                        title: "Pinterest Image".to_string(),
+                                        duration: None,
+                                        thumbnail: None,
+                                        uploader: Some("Pinterest".to_string()),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            return Err(AppError::Download("Не удалось извлечь фото с Pinterest. Возможно ссылка битая.".into()));
+        }
+
         return Err(AppError::YtDlp {
             message: stderr,
             exit_code: status.code().unwrap_or(-1),
@@ -113,12 +162,19 @@ pub async fn download(
     let title = json.get("title").and_then(|v| v.as_str()).unwrap_or("Unknown").to_string();
     let duration = json.get("duration").and_then(|v| v.as_f64()).map(|d| d as u64);
     let thumbnail = json.get("thumbnail").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let uploader = json.get("uploader")
+        .or_else(|| json.get("channel"))
+        .or_else(|| json.get("uploader_id"))
+        .or_else(|| json.get("artist"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
 
     Ok(YtDlpOutput {
         file_path,
         title,
         duration,
         thumbnail,
+        uploader,
     })
 }
 
@@ -147,6 +203,11 @@ pub async fn get_info(config: &AppConfig, url: &str, proxy: Option<&str>) -> Res
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
+        
+        if stderr.contains("No video formats found") && url.contains("pin") {
+            return Err(AppError::Download("Скачивание фото с Pinterest пока не поддерживается, бот качает только видео!".into()));
+        }
+
         return Err(AppError::YtDlp {
             message: stderr.into_owned(),
             exit_code: output.status.code().unwrap_or(-1),
@@ -207,9 +268,15 @@ pub async fn get_info(config: &AppConfig, url: &str, proxy: Option<&str>) -> Res
                         title = json.get("title").and_then(|v| v.as_str()).unwrap_or("Playlist").to_string();
                     }
                     continue;
-                } else if t == "url" {
+                } else if t == "url" || t == "url_transparent" {
                     if let Some(entry_url) = json.get("url").and_then(|v| v.as_str()) {
                         playlist_urls.push(entry_url.to_string());
+                    }
+                    if title.is_empty() {
+                        title = json.get("playlist_title").or_else(|| json.get("playlist")).and_then(|v| v.as_str()).unwrap_or("Playlist").to_string();
+                    }
+                    if playlist_count.is_none() {
+                        playlist_count = json.get("playlist_count").and_then(|v| v.as_u64()).map(|n| n as u32);
                     }
                     continue;
                 }
@@ -220,11 +287,15 @@ pub async fn get_info(config: &AppConfig, url: &str, proxy: Option<&str>) -> Res
                 title = json.get("title").and_then(|v| v.as_str()).unwrap_or("Unknown").to_string();
             }
 
+            if json.get("is_live").and_then(|v| v.as_bool()).unwrap_or(false) {
+                return Err(AppError::Download("Скачивание прямых трансляций (Live) не поддерживается".into()));
+            }
+
             // Parse formats
             if let Some(formats) = json.get("formats").and_then(|v| v.as_array()) {
                 raw_formats = Some(formats.clone());
                 let mut has_audio = false;
-                let mut max_height = 0;
+                let mut heights = std::collections::HashSet::new();
                 for f in formats {
                     let acodec = f.get("acodec").and_then(|v| v.as_str()).unwrap_or("none");
                     let vcodec = f.get("vcodec").and_then(|v| v.as_str()).unwrap_or("none");
@@ -233,7 +304,7 @@ pub async fn get_info(config: &AppConfig, url: &str, proxy: Option<&str>) -> Res
                     }
                     if vcodec != "none" {
                         if let Some(height) = f.get("height").and_then(|v| v.as_i64()) {
-                            max_height = max_height.max(height);
+                            heights.insert(height);
                         }
                     }
                 }
@@ -242,12 +313,13 @@ pub async fn get_info(config: &AppConfig, url: &str, proxy: Option<&str>) -> Res
                     available_qualities.push(Quality::AudioBest);
                 }
                 
-                if max_height > 0 {
-                    if max_height >= 360 { available_qualities.push(Quality::Video360p); }
-                    if max_height >= 480 { available_qualities.push(Quality::Video480p); }
-                    if max_height >= 720 { available_qualities.push(Quality::Video720p); }
-                    if max_height >= 1080 { available_qualities.push(Quality::Video1080p); }
-                    if max_height >= 2160 { available_qualities.push(Quality::Video4K); }
+                if !heights.is_empty() {
+                    if heights.iter().any(|&h| h >= 240 && h < 400) { available_qualities.push(Quality::Video360p); }
+                    if heights.iter().any(|&h| h >= 400 && h < 550) { available_qualities.push(Quality::Video480p); }
+                    if heights.iter().any(|&h| h >= 700 && h < 850) { available_qualities.push(Quality::Video720p); }
+                    if heights.iter().any(|&h| h >= 1000 && h < 1400) { available_qualities.push(Quality::Video1080p); }
+                    if heights.iter().any(|&h| h >= 1400 && h < 2000) { available_qualities.push(Quality::Video1440p); }
+                    if heights.iter().any(|&h| h >= 2000) { available_qualities.push(Quality::Video4K); }
                 }
             }
         }
@@ -275,13 +347,19 @@ pub async fn get_info(config: &AppConfig, url: &str, proxy: Option<&str>) -> Res
                 };
 
                 if let Some(th) = target_height {
+                    let mut max_bytes = 0;
                     for f in fmts {
-                        if f.get("height").and_then(|v| v.as_i64()) == Some(th) {
-                            if let Some(bytes) = f.get("filesize").and_then(|v| v.as_u64()).or_else(|| f.get("filesize_approx").and_then(|v| v.as_u64())) {
-                                sz_bytes = Some(bytes);
-                                break;
+                        let vcodec = f.get("vcodec").and_then(|v| v.as_str()).unwrap_or("none");
+                        if vcodec != "none" && !vcodec.contains("mhtml") {
+                            if f.get("height").and_then(|v| v.as_i64()) == Some(th) {
+                                if let Some(bytes) = f.get("filesize").and_then(|v| v.as_u64()).or_else(|| f.get("filesize_approx").and_then(|v| v.as_u64())) {
+                                    max_bytes = max_bytes.max(bytes);
+                                }
                             }
                         }
+                    }
+                    if max_bytes > 0 {
+                        sz_bytes = Some(max_bytes);
                     }
                 }
             }

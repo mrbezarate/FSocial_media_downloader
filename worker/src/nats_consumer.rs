@@ -35,6 +35,7 @@ pub async fn publish_progress(
         task_id: task_id.to_string(),
         chat_id,
         status_message_id,
+        status_is_media: false,
         reply_to_message_id: None,
         is_group: false,
         status: TaskStatus::Progress {
@@ -97,11 +98,64 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                         let res = if req.url.contains("spotify.com") {
                             let mut playlist_urls = Vec::new();
                             let is_playlist = req.url.contains("/playlist/") || req.url.contains("/album/");
-                            
-                            if is_playlist {
-                                let client = reqwest::Client::new();
-                                if let Ok(resp) = client.get(&req.url).send().await {
-                                    if let Ok(html) = resp.text().await {
+                            let mut title = if is_playlist { "Spotify Плейлист/Альбом".to_string() } else { "Spotify Audio".to_string() };
+                            let mut thumbnail = None;
+                            let mut uploader = Some("Spotify".to_string());
+                            let mut duration_secs = None;
+
+                            let spotify_client = crate::audio::spotify::SpotifyClient::new();
+                            if let Some((stype, sid)) = crate::audio::spotify::SpotifyClient::parse_spotify_url(&req.url) {
+                                if stype == crate::audio::spotify::SpotifyType::Track {
+                                    if let Ok(meta) = spotify_client.get_track(&ctx_info.config, &sid).await {
+                                        title = meta.title.clone();
+                                        uploader = Some(meta.primary_artist().to_string());
+                                        thumbnail = meta.cover_url.clone();
+                                        if meta.duration_ms > 0 {
+                                            duration_secs = Some(meta.duration_ms / 1000);
+                                        }
+                                    }
+                                }
+                            }
+
+                            let client = reqwest::Client::builder()
+                                .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
+                                .build()
+                                .unwrap_or_else(|_| reqwest::Client::new());
+
+                            if let Ok(resp) = client.get(&req.url).send().await {
+                                if let Ok(html) = resp.text().await {
+                                    if thumbnail.is_none() {
+                                        if let Some(caps) = regex::Regex::new(r#"<meta property="og:image" content="([^"]+)""#).unwrap().captures(&html) {
+                                            thumbnail = Some(caps.get(1).unwrap().as_str().to_string());
+                                        }
+                                    }
+                                    if title == "Spotify Audio" || title == "Spotify Плейлист/Альбом" {
+                                        if let Some(caps) = regex::Regex::new(r#"<meta property="og:title" content="([^"]+)""#).unwrap().captures(&html) {
+                                            let t = caps.get(1).unwrap().as_str().to_string();
+                                            title = t.replace("&amp;", "&").replace("&#39;", "'").replace("&quot;", "\"");
+                                            
+                                            if !is_playlist {
+                                                if title.contains("·") {
+                                                    let parts: Vec<&str> = title.split(" · ").collect();
+                                                    if parts.len() >= 2 {
+                                                        let new_title = parts[1].to_string();
+                                                        uploader = Some(parts[0].to_string());
+                                                        title = new_title;
+                                                    }
+                                                } else if title.contains(" - song and lyrics by ") {
+                                                    let parts: Vec<&str> = title.split(" - song and lyrics by ").collect();
+                                                    if parts.len() == 2 {
+                                                        let new_title = parts[0].to_string();
+                                                        let artist_part = parts[1].split(" | Spotify").next().unwrap_or(parts[1]);
+                                                        uploader = Some(artist_part.to_string());
+                                                        title = new_title;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    
+                                    if is_playlist {
                                         let re = regex::Regex::new(r"spotify:track:([a-zA-Z0-9]+)").unwrap();
                                         for cap in re.captures_iter(&html) {
                                             if let Some(id) = cap.get(1) {
@@ -115,47 +169,60 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                                 }
                             }
 
+                            let mut filesize_bytes = None;
+                            if let Some(ds) = duration_secs {
+                                filesize_bytes = Some(ds * 32000);
+                            }
+
+                            let mut qual_opt = fsocial_common::QualityOption {
+                                quality: fsocial_common::Quality::AudioBest,
+                                filesize_bytes,
+                                estimated_secs: filesize_bytes.map(|b| (b / (10 * 1024 * 1024)).max(1)),
+                                speed_category: "🚀".to_string(),
+                                display_label: "🎵 MP3".to_string(),
+                                full_button_label: "🎵 MP3".to_string(),
+                            };
+
+                            if let Some(sz) = filesize_bytes {
+                                let mb = sz / (1024 * 1024);
+                                if mb > 0 {
+                                    qual_opt.display_label = format!("🎵 MP3 (~{} МБ)", mb);
+                                    qual_opt.full_button_label = format!("🎵 MP3  •  ~{} МБ", mb);
+                                }
+                            }
+
                             Ok(fsocial_common::InfoResponse {
-                                title: if is_playlist { "Spotify Плейлист/Альбом".to_string() } else { "Spotify Audio".to_string() },
-                                uploader: Some("Spotify".to_string()),
-                                thumbnail: None,
-                                duration_secs: None,
-                                available_qualities: vec![fsocial_common::QualityOption {
-                                    quality: fsocial_common::Quality::AudioBest,
-                                    filesize_bytes: None,
-                                    estimated_secs: None,
-                                    speed_category: "🚀".to_string(),
-                                    display_label: "🎵 MP3".to_string(),
-                                    full_button_label: "🎵 MP3".to_string(),
-                                }],
+                                title,
+                                uploader,
+                                thumbnail,
+                                duration_secs,
+                                available_qualities: vec![qual_opt],
                                 is_playlist,
                                 playlist_count: if is_playlist { Some(playlist_urls.len() as u32) } else { None },
                                 playlist_urls,
                                 error: None,
                             })
-                        } else if req.url.contains("soundcloud.com") {
-                            let is_sc_playlist = req.url.split('?').next().unwrap_or(&req.url).contains("/sets/");
-                            Ok(fsocial_common::InfoResponse {
-                                title: "SoundCloud Audio".to_string(),
-                                uploader: Some("SoundCloud".to_string()),
-                                thumbnail: None,
-                                duration_secs: None,
-                                available_qualities: vec![fsocial_common::QualityOption {
-                                    quality: fsocial_common::Quality::AudioBest,
-                                    filesize_bytes: None,
-                                    estimated_secs: None,
-                                    speed_category: "🚀".to_string(),
-                                    display_label: "🎵 MP3".to_string(),
-                                    full_button_label: "🎵 MP3".to_string(),
-                                }],
-                                is_playlist: is_sc_playlist,
-                                playlist_count: None,
-                                playlist_urls: vec![],
-                                error: None,
-                            })
                         } else {
-                            let proxy = ctx_info.proxy_pool.next();
-                            media::ytdlp::get_info(&ctx_info.config, &req.url, proxy).await
+                            let mut info_attempts = 0;
+                            let max_info_attempts = 3;
+                            let mut info_res = Err(fsocial_common::AppError::Download("Failed to get info".into()));
+                            
+                            while info_attempts < max_info_attempts {
+                                info_attempts += 1;
+                                let proxy = ctx_info.proxy_pool.next();
+                                info_res = media::ytdlp::get_info(&ctx_info.config, &req.url, proxy).await;
+                                
+                                if info_res.is_ok() {
+                                    break;
+                                } else if let Err(ref e) = info_res {
+                                    if !e.is_retryable() || info_attempts >= max_info_attempts {
+                                        break;
+                                    }
+                                    tracing::warn!("get_info failed on url {} (attempt {}/{}). Retrying... Error: {:?}", req.url, info_attempts, max_info_attempts, e);
+                                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                                }
+                            }
+                            info_res
                         };
                         let reply_data = match res {
                             Ok(info_res) => info_res,
@@ -318,7 +385,7 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                 current_task.spotify_meta = None;
 
                 let mut attempts = 0;
-                let max_attempts = 5;
+                let max_attempts = 3;
                 let mut track_success = false;
 
                 while attempts < max_attempts {
@@ -328,7 +395,6 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                         audio::process_spotify_task(&ctx_clone, &current_task, Some(tx.clone())).await
                     } else {
                         media::process_media_task(&ctx_clone, &current_task, Some(tx.clone())).await
-                            .map(|(path, title, dur)| (path, title, dur, None, None))
                     };
 
                     match result {
@@ -338,6 +404,14 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                             break; // Track downloaded successfully, break retry loop
                         }
                         Err(e) => {
+                            if !e.is_retryable() {
+                                tracing::warn!("Task {} encountered non-retryable error on url {}: {:?}", task.task_id, url, e);
+                                if first_error.is_none() {
+                                    first_error = Some(e);
+                                }
+                                break; // Give up immediately
+                            }
+
                             if attempts >= max_attempts {
                                 tracing::warn!("Task {} finally failed on url {} after {} attempts: {:?}", task.task_id, url, attempts, e);
                                 if first_error.is_none() {
@@ -346,7 +420,7 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                                 break; // Give up on this track
                             }
                             
-                            tracing::warn!("Task {} failed on url {} (attempt {}/{}). Rate limit suspected. Waiting 15s... Error: {:?}", task.task_id, url, attempts, max_attempts, e);
+                            tracing::warn!("Task {} failed on url {} (attempt {}/{}). Retryable error. Waiting 15s... Error: {:?}", task.task_id, url, attempts, max_attempts, e);
                             tokio::time::sleep(tokio::time::Duration::from_secs(15)).await;
                         }
                     }
@@ -366,6 +440,7 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                         task_id: task.task_id.clone(),
                         chat_id: task.chat_id,
                         status_message_id: task.status_message_id,
+                        status_is_media: task.status_is_media,
                         reply_to_message_id: task.reply_to_message_id,
                         is_group: task.is_group,
                         status: TaskStatus::Failed {
@@ -383,6 +458,7 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                         task_id: task.task_id.clone(),
                         chat_id: task.chat_id,
                         status_message_id: task.status_message_id,
+                        status_is_media: task.status_is_media,
                         reply_to_message_id: task.reply_to_message_id,
                         is_group: task.is_group,
                         status: TaskStatus::PlaylistCompleted {
@@ -400,6 +476,7 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                         task_id: task.task_id.clone(),
                         chat_id: task.chat_id,
                         status_message_id: task.status_message_id,
+                        status_is_media: task.status_is_media,
                         reply_to_message_id: task.reply_to_message_id,
                         is_group: task.is_group,
                         status: TaskStatus::Failed {
@@ -417,6 +494,7 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                         task_id: task.task_id.clone(),
                         chat_id: task.chat_id,
                         status_message_id: task.status_message_id,
+                        status_is_media: task.status_is_media,
                         reply_to_message_id: task.reply_to_message_id,
                         is_group: task.is_group,
                         status: TaskStatus::Completed {

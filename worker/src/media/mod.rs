@@ -10,10 +10,11 @@ pub async fn process_media_task(
     ctx: &WorkerContext,
     task: &DownloadTask,
     progress_tx: Option<tokio::sync::mpsc::Sender<fsocial_common::ProgressEvent>>,
-) -> Result<(String, String, Option<u64>), AppError> {
+) -> Result<(String, String, Option<u64>, Option<String>, Option<String>), AppError> {
     if let Some(cached) = ctx.cache.get(&task.url).await {
         info!("Cache hit for URL: {}", task.url);
-        return Ok((cached.file_path, cached.title, cached.duration));
+        // In a real app we'd also cache the thumbnail path, but for now just return None for cached items
+        return Ok((cached.file_path, cached.title, cached.duration, None, None));
     }
 
     let mut attempts = 0;
@@ -44,7 +45,54 @@ pub async fn process_media_task(
                 };
                 let _ = ctx.cache.set(&task.url, cached).await;
                 
-                return Ok((output.file_path, output.title, output.duration));
+                let mut thumb_path = None;
+                if let Some(thumb_url) = output.thumbnail {
+                    match crate::audio::tagger::download_cover(&thumb_url).await {
+                        Ok(cover_data) => {
+                            let cover_path = format!("{}_cover.jpg", output.file_path);
+                            if let Ok(_) = tokio::fs::write(&cover_path, &cover_data).await {
+                                thumb_path = Some(cover_path);
+                                
+                                // Optionally apply the cover to the MP3 metadata if it's audio
+                                if task.quality.is_audio() {
+                                    // Use a dummy SpotifyTrackMeta to just set the cover and author
+                                    let dummy_meta = fsocial_common::SpotifyTrackMeta {
+                                        title: output.title.clone(),
+                                        artists: output.uploader.clone().map(|s| vec![s]).unwrap_or_default(),
+                                        album: "Single".to_string(),
+                                        year: None,
+                                        track_number: None,
+                                        total_tracks: None,
+                                        isrc: None,
+                                        cover_url: Some(thumb_url),
+                                        duration_ms: output.duration.unwrap_or(0) * 1000,
+                                        genres: vec![],
+                                    };
+                                    let _ = crate::audio::tagger::apply_tags(&output.file_path, &dummy_meta, Some(cover_data)).await;
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to download cover for media: {}", e);
+                        }
+                    }
+                } else if task.quality.is_audio() && output.uploader.is_some() {
+                    let dummy_meta = fsocial_common::SpotifyTrackMeta {
+                        title: output.title.clone(),
+                        artists: vec![output.uploader.clone().unwrap()],
+                        album: "Single".to_string(),
+                        year: None,
+                        track_number: None,
+                        total_tracks: None,
+                        isrc: None,
+                        cover_url: None,
+                        duration_ms: output.duration.unwrap_or(0) * 1000,
+                        genres: vec![],
+                    };
+                    let _ = crate::audio::tagger::apply_tags(&output.file_path, &dummy_meta, None).await;
+                }
+
+                return Ok((output.file_path, output.title, output.duration, output.uploader, thumb_path));
             }
             Err(e) => {
                 if let Some(p) = proxy {

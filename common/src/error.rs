@@ -63,13 +63,21 @@ pub enum AppError {
 impl AppError {
     /// Whether this error is transient and the operation should be retried
     pub fn is_retryable(&self) -> bool {
-        matches!(
-            self,
+        match self {
             AppError::Nats(_)
-                | AppError::RateLimited { .. }
-                | AppError::ProxyExhausted { .. }
-                | AppError::Http(_)
-                | AppError::PlatformBlock { .. }
-        )
+            | AppError::RateLimited { .. }
+            | AppError::ProxyExhausted { .. }
+            | AppError::Http(_)
+            | AppError::PlatformBlock { .. } => true,
+            AppError::YtDlp { message, .. } => {
+                let msg_lower = message.to_lowercase();
+                msg_lower.contains("rehydration") ||
+                msg_lower.contains("blocked") ||
+                msg_lower.contains("captcha") ||
+                msg_lower.contains("connection") ||
+                msg_lower.contains("timeout")
+            },
+            _ => false,
+        }
     }
 }

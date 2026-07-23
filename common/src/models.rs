@@ -49,6 +49,7 @@ pub enum Quality {
     Video480p,
     Video720p,
     Video1080p,
+    Video1440p,
     Video4K,
     Best,
 }
@@ -64,6 +65,7 @@ impl Quality {
             Quality::Video480p => "bestvideo[height<=480]+bestaudio/best[height<=480]",
             Quality::Video720p => "bestvideo[height<=720]+bestaudio/best[height<=720]",
             Quality::Video1080p => "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
+            Quality::Video1440p => "bestvideo[height<=1440]+bestaudio/best[height<=1440]",
             Quality::Video4K => "bestvideo[height<=2160]+bestaudio/best[height<=2160]",
             Quality::Best => "bestvideo+bestaudio/best",
         }
@@ -79,6 +81,7 @@ impl Quality {
             Quality::Video480p => "📹 480p",
             Quality::Video720p => "📹 720p",
             Quality::Video1080p => "📹 1080p",
+            Quality::Video1440p => "📹 1440p",
             Quality::Video4K => "📹 4K",
             Quality::Best => "⭐ Лучшее качество",
         }
@@ -94,6 +97,7 @@ impl Quality {
             Quality::Video480p => "q_v480",
             Quality::Video720p => "q_v720",
             Quality::Video1080p => "q_v1080",
+            Quality::Video1440p => "q_v1440",
             Quality::Video4K => "q_v4k",
             Quality::Best => "q_best",
         }
@@ -109,6 +113,7 @@ impl Quality {
             "q_v480" => Some(Quality::Video480p),
             "q_v720" => Some(Quality::Video720p),
             "q_v1080" => Some(Quality::Video1080p),
+            "q_v1440" => Some(Quality::Video1440p),
             "q_v4k" => Some(Quality::Video4K),
             "q_best" => Some(Quality::Best),
             _ => None,
@@ -122,6 +127,7 @@ impl Quality {
             Quality::Video480p,
             Quality::Video720p,
             Quality::Video1080p,
+            Quality::Video1440p,
             Quality::Video4K,
             Quality::AudioBest,
             Quality::Best,
@@ -154,6 +160,8 @@ pub struct DownloadTask {
     pub chat_id: i64,
     pub message_id: i32,
     pub status_message_id: Option<i32>,
+    #[serde(default)]
+    pub status_is_media: bool,
     pub reply_to_message_id: Option<i32>,
     pub user_id: u64,
     pub is_group: bool,
@@ -182,6 +190,7 @@ impl DownloadTask {
             chat_id,
             message_id,
             status_message_id: None,
+            status_is_media: false,
             reply_to_message_id: None,
             user_id,
             is_group,
@@ -199,6 +208,8 @@ pub struct TaskResult {
     pub task_id: String,
     pub chat_id: i64,
     pub status_message_id: Option<i32>,
+    #[serde(default)]
+    pub status_is_media: bool,
     pub reply_to_message_id: Option<i32>,
     pub is_group: bool,
     pub status: TaskStatus,

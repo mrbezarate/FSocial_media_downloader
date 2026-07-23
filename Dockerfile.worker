@@ -52,7 +52,8 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install yt-dlp via pip to include curl-cffi for impersonation bypass (e.g. TikTok)
-RUN pip3 install --no-cache-dir --break-system-packages "yt-dlp[default,curl-cffi]"
+# Cache bust: 2026-07-23 (yt-dlp update to nightly)
+RUN pip3 install -U --no-cache-dir --break-system-packages "https://github.com/yt-dlp/yt-dlp/archive/master.tar.gz" "curl-cffi"
 
 # Create directories
 RUN mkdir -p /shared_data /app/cache

@@ -71,6 +71,7 @@ pub async fn handle(
                                     false,
                                 );
                                 task.status_message_id = Some(msg.id().0);
+                                task.status_is_media = msg.regular_message().map(|m| m.photo().is_some() || m.video().is_some() || m.animation().is_some() || m.document().is_some() || m.audio().is_some()).unwrap_or(false);
                                 task.playlist_urls = Some(info.playlist_urls.clone());
                                 let _ = nats.publish_task(&task).await;
                                 return Ok(());
@@ -87,7 +88,8 @@ pub async fn handle(
                             user_id,
                             false,
                         );
-                        task.status_message_id = Some(message_id);
+                        task.status_message_id = Some(msg.id().0);
+                        task.status_is_media = msg.regular_message().map(|m| m.photo().is_some() || m.video().is_some() || m.animation().is_some() || m.document().is_some() || m.audio().is_some()).unwrap_or(false);
 
                         if let Err(e) = nats.publish_task(&task).await {
                             error!("Failed to publish task: {}", e);

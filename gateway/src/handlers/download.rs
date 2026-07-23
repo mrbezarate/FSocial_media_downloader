@@ -45,8 +45,12 @@ pub async fn handle(
     let chat_id = msg.chat.id.0;
     let message_id = msg.id.0;
 
-    if is_group {
-        let default_quality = if url_match.media_type == fsocial_common::MediaType::Audio {
+    let bypass_info = is_group || url_match.platform == fsocial_common::Platform::Pinterest;
+
+    if bypass_info {
+        let default_quality = if url_match.platform == fsocial_common::Platform::Pinterest {
+            fsocial_common::Quality::Best
+        } else if url_match.media_type == fsocial_common::MediaType::Audio {
             config.default_audio_quality.clone()
         } else {
             config.default_video_quality.clone()
@@ -60,7 +64,7 @@ pub async fn handle(
             chat_id,
             message_id,
             user_id,
-            true,
+            is_group,
         );
         task.reply_to_message_id = Some(message_id);
 
@@ -116,10 +120,17 @@ pub async fn handle(
             Err(e) => {
                 // Link is broken, private or invalid -> delete user's message and inform
                 let _ = bot.delete_message(msg.chat.id, msg.id).await;
-                let err_msg = format!(
-                    "❌ <b>Не удалось обработать ссылку!</b>\n<i>Причина: {}</i>\n\n{}",
-                    e, SUPPORTED_SOURCES_INFO
-                );
+                
+                let e_str = e.to_string();
+                let err_msg = if e_str.contains("Скачивание прямых") || e_str.contains("Скачивание фото") {
+                    format!("❌ <b>Ошибка:</b>\n<i>{}</i>", e_str)
+                } else {
+                    format!(
+                        "❌ <b>Не удалось обработать ссылку!</b>\n<i>Причина: {}</i>\n\n{}",
+                        e_str, SUPPORTED_SOURCES_INFO
+                    )
+                };
+                
                 let _ = bot
                     .send_message(msg.chat.id, err_msg)
                     .parse_mode(teloxide::types::ParseMode::Html)
