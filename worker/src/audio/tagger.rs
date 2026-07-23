@@ -21,7 +21,11 @@ pub async fn apply_tags(file_path: &str, meta: &SpotifyTrackMeta, cover_data: Op
 
     // lofty operations are synchronous — run in blocking task
     tokio::task::spawn_blocking(move || {
-        let temp_path = format!("{}.tmp", file_path);
+        let ext = std::path::Path::new(&file_path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("mp3");
+        let temp_path = format!("{}_tmp.{}", file_path, ext);
         std::fs::copy(&file_path, &temp_path)
             .map_err(|e| AppError::Tagging(format!("Failed to copy to temp: {}", e)))?;
 

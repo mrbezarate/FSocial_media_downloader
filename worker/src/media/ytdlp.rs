@@ -161,7 +161,14 @@ pub async fn download(
 
     let title = json.get("title").and_then(|v| v.as_str()).unwrap_or("Unknown").to_string();
     let duration = json.get("duration").and_then(|v| v.as_f64()).map(|d| d as u64);
-    let thumbnail = json.get("thumbnail").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let mut thumbnail = json.get("thumbnail").and_then(|v| v.as_str()).map(|s| s.to_string());
+    if thumbnail.is_none() {
+        if let Some(thumbnails) = json.get("thumbnails").and_then(|v| v.as_array()) {
+            if let Some(last) = thumbnails.last() {
+                thumbnail = last.get("url").and_then(|v| v.as_str()).map(|s| s.to_string());
+            }
+        }
+    }
     let uploader = json.get("uploader")
         .or_else(|| json.get("channel"))
         .or_else(|| json.get("uploader_id"))
