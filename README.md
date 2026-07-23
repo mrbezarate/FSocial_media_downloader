@@ -3,6 +3,12 @@
   <p><strong>Высоконагруженный мультимедийный Telegram-шлюз на Rust</strong></p>
   
   <p>
+    <a href="https://t.me/FSocial_Media_Downloader_bot">
+      <img src="https://img.shields.io/badge/Telegram-Try_Bot-2CA5E0?style=for-the-badge&logo=telegram" alt="Telegram Bot" />
+    </a>
+  </p>
+  
+  <p>
     <img src="https://img.shields.io/badge/Language-Rust-f74c00?style=for-the-badge&logo=rust" alt="Rust" />
     <img src="https://img.shields.io/badge/Broker-NATS-27A1E1?style=for-the-badge&logo=nats" alt="NATS JetStream" />
     <img src="https://img.shields.io/badge/Framework-Teloxide-0088cc?style=for-the-badge&logo=telegram" alt="Teloxide" />
