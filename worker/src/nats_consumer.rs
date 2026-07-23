@@ -51,6 +51,34 @@ pub async fn publish_progress(
     }
 }
 
+pub async fn publish_playlist_progress(
+    client: &async_nats::Client,
+    task_id: &str,
+    chat_id: i64,
+    status_message_id: Option<i32>,
+    completed: u32,
+    total: u32,
+    text: &str,
+) {
+    let res = TaskResult {
+        task_id: task_id.to_string(),
+        chat_id,
+        status_message_id,
+        status_is_media: false,
+        reply_to_message_id: None,
+        is_group: false,
+        status: TaskStatus::PlaylistProgress {
+            completed,
+            total,
+            status_text: text.to_string(),
+        },
+    };
+    let payload = serde_json::to_vec(&res).unwrap();
+    if let Err(e) = client.publish(fsocial_common::subjects::TASK_PROGRESS.to_string(), payload.into()).await {
+        tracing::error!("Failed to publish TaskProgress: {:?}", e);
+    }
+}
+
 pub async fn run(ctx: Arc<WorkerContext>) {
     let consumer = match ctx.nats_jetstream
         .get_or_create_stream(async_nats::jetstream::stream::Config {
@@ -376,16 +404,25 @@ pub async fn run(ctx: Arc<WorkerContext>) {
 
                                             if is_playlist_mode_prog {
                                                 text = format!("Скачивание плейлиста: {}/{}\n⏳ {}", current_idx + 1, total_tracks, text);
+                                                publish_playlist_progress(
+                                                    &ctx_prog.nats_client,
+                                                    &task_id_prog,
+                                                    chat_id_prog,
+                                                    status_msg_id_prog,
+                                                    (current_idx + 1) as u32,
+                                                    total_tracks as u32,
+                                                    &text
+                                                ).await;
+                                            } else {
+                                                publish_progress(
+                                                    &ctx_prog.nats_client,
+                                                    &task_id_prog,
+                                                    chat_id_prog,
+                                                    status_msg_id_prog,
+                                                    pct,
+                                                    &text
+                                                ).await;
                                             }
-
-                                            publish_progress(
-                                                &ctx_prog.nats_client,
-                                                &task_id_prog,
-                                                chat_id_prog,
-                                                status_msg_id_prog,
-                                                pct,
-                                                &text
-                                            ).await;
                                         }
                                     }
                                 }

@@ -225,78 +225,110 @@ impl SpotifyClient {
     }
 
     pub async fn get_playlist_track_urls(&self, config: &AppConfig, playlist_id: &str) -> Result<Vec<String>, AppError> {
-        let token = self.ensure_token(config).await?;
         let mut urls = Vec::new();
-        let mut url = format!("https://api.spotify.com/v1/playlists/{}/tracks?limit=100", playlist_id);
+        if let Ok(token) = self.ensure_token(config).await {
+            let mut url = format!("https://api.spotify.com/v1/playlists/{}/tracks?limit=100", playlist_id);
 
-        loop {
-            let res = self.client.get(&url)
-                .bearer_auth(&token)
-                .send()
-                .await
-                .map_err(|e| AppError::Spotify(e.to_string()))?;
+            loop {
+                let res = self.client.get(&url)
+                    .bearer_auth(&token)
+                    .send()
+                    .await;
 
-            if !res.status().is_success() {
-                return Err(AppError::Spotify(format!("API error: {}", res.status())));
-            }
+                if let Ok(res) = res {
+                    if res.status().is_success() {
+                        if let Ok(v) = res.json::<serde_json::Value>().await {
+                            if let Some(items) = v["items"].as_array() {
+                                for item in items {
+                                    if let Some(track) = item.get("track") {
+                                        if let Some(id) = track["id"].as_str() {
+                                            let track_url = format!("https://open.spotify.com/track/{}", id);
+                                            if !urls.contains(&track_url) {
+                                                urls.push(track_url);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
 
-            let v: serde_json::Value = res.json().await.map_err(|e| AppError::Spotify(e.to_string()))?;
-            
-            if let Some(items) = v["items"].as_array() {
-                for item in items {
-                    if let Some(track) = item.get("track") {
-                        if let Some(id) = track["id"].as_str() {
-                            let track_url = format!("https://open.spotify.com/track/{}", id);
-                            if !urls.contains(&track_url) {
-                                urls.push(track_url);
+                            if let Some(next) = v["next"].as_str() {
+                                url = next.to_string();
+                                continue;
                             }
                         }
                     }
                 }
-            }
-
-            if let Some(next) = v["next"].as_str() {
-                url = next.to_string();
-            } else {
                 break;
+            }
+        }
+        
+        if urls.is_empty() {
+            info!("Falling back to web scraping for Spotify playlist: {}", playlist_id);
+            if let Ok(html) = self.client.get(format!("https://open.spotify.com/playlist/{}", playlist_id))
+                .send().await.and_then(|r| r.error_for_status()) {
+                if let Ok(text) = html.text().await {
+                    let re = regex::Regex::new(r"https://open\.spotify\.com/track/[a-zA-Z0-9]+").unwrap();
+                    for mat in re.find_iter(&text) {
+                        let u = mat.as_str().to_string();
+                        if !urls.contains(&u) {
+                            urls.push(u);
+                        }
+                    }
+                }
             }
         }
         Ok(urls)
     }
 
     pub async fn get_album_track_urls(&self, config: &AppConfig, album_id: &str) -> Result<Vec<String>, AppError> {
-        let token = self.ensure_token(config).await?;
         let mut urls = Vec::new();
-        let mut url = format!("https://api.spotify.com/v1/albums/{}/tracks?limit=50", album_id);
+        if let Ok(token) = self.ensure_token(config).await {
+            let mut url = format!("https://api.spotify.com/v1/albums/{}/tracks?limit=50", album_id);
 
-        loop {
-            let res = self.client.get(&url)
-                .bearer_auth(&token)
-                .send()
-                .await
-                .map_err(|e| AppError::Spotify(e.to_string()))?;
+            loop {
+                let res = self.client.get(&url)
+                    .bearer_auth(&token)
+                    .send()
+                    .await;
 
-            if !res.status().is_success() {
-                return Err(AppError::Spotify(format!("API error: {}", res.status())));
-            }
+                if let Ok(res) = res {
+                    if res.status().is_success() {
+                        if let Ok(v) = res.json::<serde_json::Value>().await {
+                            if let Some(items) = v["items"].as_array() {
+                                for track in items {
+                                    if let Some(id) = track["id"].as_str() {
+                                        let track_url = format!("https://open.spotify.com/track/{}", id);
+                                        if !urls.contains(&track_url) {
+                                            urls.push(track_url);
+                                        }
+                                    }
+                                }
+                            }
 
-            let v: serde_json::Value = res.json().await.map_err(|e| AppError::Spotify(e.to_string()))?;
-            
-            if let Some(items) = v["items"].as_array() {
-                for track in items {
-                    if let Some(id) = track["id"].as_str() {
-                        let track_url = format!("https://open.spotify.com/track/{}", id);
-                        if !urls.contains(&track_url) {
-                            urls.push(track_url);
+                            if let Some(next) = v["next"].as_str() {
+                                url = next.to_string();
+                                continue;
+                            }
                         }
                     }
                 }
-            }
-
-            if let Some(next) = v["next"].as_str() {
-                url = next.to_string();
-            } else {
                 break;
+            }
+        }
+
+        if urls.is_empty() {
+            info!("Falling back to web scraping for Spotify album: {}", album_id);
+            if let Ok(html) = self.client.get(format!("https://open.spotify.com/album/{}", album_id))
+                .send().await.and_then(|r| r.error_for_status()) {
+                if let Ok(text) = html.text().await {
+                    let re = regex::Regex::new(r"https://open\.spotify\.com/track/[a-zA-Z0-9]+").unwrap();
+                    for mat in re.find_iter(&text) {
+                        let u = mat.as_str().to_string();
+                        if !urls.contains(&u) {
+                            urls.push(u);
+                        }
+                    }
+                }
             }
         }
         Ok(urls)

@@ -34,6 +34,8 @@ pub async fn download(
        .arg("--write-info-json")
        .arg("--no-playlist")
        .arg("-N").arg("4") // 4 concurrent fragments to speed up downloads
+       .arg("--embed-thumbnail")
+       .arg("--embed-metadata")
        .arg("--ffmpeg-location").arg(&config.ffmpeg_path);
 
     if quality.is_audio() {
