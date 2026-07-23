@@ -96,7 +96,15 @@ async fn handle_result(bot: &crate::MyBot, res: TaskResult, config: &AppConfig) 
                         } else if path_ext == "jpg" || path_ext == "jpeg" || path_ext == "png" || path_ext == "webp" {
                             teloxide::types::InputMedia::Photo(teloxide::types::InputMediaPhoto::new(input_file).caption(title.clone()))
                         } else {
-                            teloxide::types::InputMedia::Video(teloxide::types::InputMediaVideo::new(input_file).caption(title.clone()))
+                            let mut vid = teloxide::types::InputMediaVideo::new(input_file).caption(title.clone());
+                            if let Some(thumb) = &thumb_path {
+                                let thumb_file = match tokio::fs::read(thumb).await {
+                                    Ok(data) => InputFile::memory(data).file_name("cover.jpg"),
+                                    Err(_) => InputFile::file(thumb.clone())
+                                };
+                                vid.thumbnail = Some(thumb_file);
+                            }
+                            teloxide::types::InputMedia::Video(vid)
                         }
                     };
 
@@ -146,6 +154,13 @@ async fn handle_result(bot: &crate::MyBot, res: TaskResult, config: &AppConfig) 
                         req.await
                     } else {
                         let mut req = bot.send_video(chat_id, input_file).caption(title);
+                        if let Some(thumb) = &thumb_path {
+                            let thumb_file = match tokio::fs::read(thumb).await {
+                                Ok(data) => InputFile::memory(data).file_name("cover.jpg"),
+                                Err(_) => InputFile::file(thumb.clone())
+                            };
+                            req = req.thumbnail(thumb_file);
+                        }
                         if let Some(reply_id) = res.reply_to_message_id {
                             req = req.reply_parameters(teloxide::types::ReplyParameters::new(teloxide::types::MessageId(reply_id)));
                         }
@@ -213,7 +228,15 @@ async fn handle_result(bot: &crate::MyBot, res: TaskResult, config: &AppConfig) 
                         }
                         media_group.push(InputMedia::Audio(audio));
                     } else {
-                        media_group.push(InputMedia::Video(InputMediaVideo::new(input_file).caption(title.clone())));
+                        let mut video = InputMediaVideo::new(input_file).caption(title.clone());
+                        if let Some(thumb) = thumb_path {
+                            let thumb_file = match tokio::fs::read(thumb).await {
+                                Ok(data) => InputFile::memory(data).file_name("cover.jpg"),
+                                Err(_) => InputFile::file(thumb.clone())
+                            };
+                            video.thumbnail = Some(thumb_file);
+                        }
+                        media_group.push(InputMedia::Video(video));
                     }
                 }
 

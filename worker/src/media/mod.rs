@@ -51,6 +51,10 @@ pub async fn process_media_task(
                         Ok(cover_data) => {
                             let cover_path = format!("{}_cover.jpg", output.file_path);
                             if let Ok(_) = tokio::fs::write(&cover_path, &cover_data).await {
+                                let _ = std::process::Command::new("ffmpeg")
+                                    .args(&["-y", "-i", &cover_path, "-vf", "scale=320:320:force_original_aspect_ratio=decrease", &format!("{}_tmp.jpg", cover_path)])
+                                    .output();
+                                let _ = std::fs::rename(format!("{}_tmp.jpg", cover_path), &cover_path);
                                 thumb_path = Some(cover_path);
                                 
                                 // Optionally apply the cover to the MP3 metadata if it's audio
