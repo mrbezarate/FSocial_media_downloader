@@ -1,44 +1,33 @@
-# ─── Stage 1: Build ──────────────────────────────────────────────────────────
-FROM rust:slim-bookworm AS builder
-
+# ─── Stage 1: Planner ────────────────────────────────────────────────────────
+FROM lukemathwalker/cargo-chef:latest-rust-1 AS chef
 WORKDIR /app
 
+FROM chef AS planner
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+# ─── Stage 2: Cacher & Builder ───────────────────────────────────────────────
+FROM chef AS builder
 # System dependencies for building (including lofty audio tag support)
 RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
+    libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Cache dependencies: copy manifests first
-COPY Cargo.toml Cargo.toml
-COPY common/Cargo.toml common/Cargo.toml
-COPY worker/Cargo.toml worker/Cargo.toml
+COPY --from=planner /app/recipe.json recipe.json
+# Build dependencies - this is the caching Docker layer!
+RUN cargo chef cook --release --recipe-path recipe.json
 
-# Create dummy workspace member dirs
-RUN mkdir -p common/src && echo "pub fn dummy() {}" > common/src/lib.rs
-RUN mkdir -p worker/src && echo "fn main() {}" > worker/src/main.rs
-# Gateway is a workspace member but we don't need to build it here
-RUN mkdir -p gateway/src && echo "fn main() {}" > gateway/src/main.rs
-COPY gateway/Cargo.toml gateway/Cargo.toml
-
-# Build only dependencies (cached layer)
-RUN cargo build --release --package fsocial-worker 2>/dev/null || true
-RUN rm -rf common/src worker/src
-
-# Copy real source code
-COPY common/ common/
-COPY worker/ worker/
-
-# Touch main.rs to force rebuild
-RUN touch common/src/lib.rs worker/src/main.rs
+# Build application
+COPY . .
 RUN cargo build --release --package fsocial-worker
 
-# ─── Stage 2: Runtime ────────────────────────────────────────────────────────
+# ─── Stage 3: Runtime ────────────────────────────────────────────────────────
 FROM debian:bookworm-slim AS runtime
-
 WORKDIR /app
 
-# Runtime dependencies: ffmpeg for media processing, python3 for yt-dlp, SSL certs
+# Runtime dependencies: ffmpeg for media processing, python3 for yt-dlp, SSL certs, libpq
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     libssl3 \
@@ -49,6 +38,7 @@ RUN apt-get update && apt-get install -y \
     curl \
     python3-dev \
     gcc \
+    libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Install yt-dlp via pip to include curl-cffi for impersonation bypass (e.g. TikTok)

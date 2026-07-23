@@ -6,7 +6,7 @@ use tracing::{error, info};
 
 use crate::nats_client::NatsClient;
 
-pub async fn listen(bot: Bot, nats: NatsClient, config: AppConfig) {
+pub async fn listen(bot: crate::MyBot, nats: NatsClient, config: AppConfig) {
     let mut results_sub = nats.subscribe_results().await.expect("Results sub failed");
     let mut progress_sub = nats.subscribe_progress().await.expect("Progress sub failed");
 
@@ -26,7 +26,7 @@ pub async fn listen(bot: Bot, nats: NatsClient, config: AppConfig) {
     }
 }
 
-async fn handle_result(bot: &Bot, res: TaskResult, config: &AppConfig) {
+async fn handle_result(bot: &crate::MyBot, res: TaskResult, config: &AppConfig) {
     let chat_id = teloxide::types::ChatId(res.chat_id);
 
     match res.status {
@@ -258,7 +258,7 @@ async fn handle_result(bot: &Bot, res: TaskResult, config: &AppConfig) {
     }
 }
 
-async fn handle_progress(bot: &Bot, res: TaskResult) {
+async fn handle_progress(bot: &crate::MyBot, res: TaskResult) {
     match res.status {
         TaskStatus::Progress { percent: _, status_text } => {
             if let Some(msg_id) = res.status_message_id {

@@ -16,7 +16,7 @@ const SUPPORTED_SOURCES_INFO: &str = "\
 • <b>SoundCloud</b>";
 
 pub async fn handle(
-    bot: Bot,
+    bot: crate::MyBot,
     msg: Message,
     nats: NatsClient,
     config: AppConfig,

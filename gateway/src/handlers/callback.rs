@@ -5,7 +5,7 @@ use tracing::error;
 use crate::{nats_client::NatsClient, url_parser, UrlCache};
 
 pub async fn handle(
-    bot: Bot,
+    bot: crate::MyBot,
     q: CallbackQuery,
     nats: NatsClient,
     _config: AppConfig,

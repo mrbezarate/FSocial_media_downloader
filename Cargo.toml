@@ -1,3 +1,25 @@
 [workspace]
 members = ["common", "gateway", "worker"]
 resolver = "2"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+thiserror = "2"
+teloxide = { version = "0.17.0", features = ["macros", "throttle", "cache-me", "trace-adaptor"] }
+tokio = { version = "1", features = ["full"] }
+async-nats = "0.39"
+regex = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dotenvy = "0.15"
+reqwest = { version = "0.12", features = ["json"] }
+url = "2"
+futures = "0.3"
+moka = { version = "0.12", features = ["future"] }
+deadpool-redis = "0.18"
+redis = { version = "0.27", features = ["tokio-comp"] }
+lofty = "0.22"
+base64 = "0.22"

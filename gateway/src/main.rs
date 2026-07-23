@@ -17,6 +17,8 @@ mod url_parser;
 
 pub type UrlCache = Arc<Mutex<HashMap<String, String>>>;
 
+pub type MyBot = teloxide::adaptors::CacheMe<teloxide::adaptors::Throttle<teloxide::Bot>>;
+
 use nats_client::NatsClient;
 
 #[tokio::main]
@@ -48,12 +50,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let token = std::env::var("TELOXIDE_TOKEN").expect("TELOXIDE_TOKEN must be set");
     
-    let bot = if let Some(ref url) = config.telegram_api_url {
+    let base_bot = if let Some(ref url) = config.telegram_api_url {
         let api_url = url::Url::parse(url).expect("Invalid TELEGRAM_API_URL");
         Bot::with_client(token, client).set_api_url(api_url)
     } else {
         Bot::with_client(token, client)
     };
+
+    use teloxide::adaptors::throttle::Limits;
+    let bot = base_bot.throttle(Limits::default()).cache_me();
 
     let bot_clone = bot.clone();
     let nats_clone = nats_client.clone();

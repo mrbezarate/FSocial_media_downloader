@@ -13,7 +13,7 @@ pub enum Command {
     Settings,
 }
 
-pub async fn handle(bot: Bot, msg: Message, cmd: Command) -> ResponseResult<()> {
+pub async fn handle(bot: crate::MyBot, msg: Message, cmd: Command) -> ResponseResult<()> {
     match cmd {
         Command::Start => {
             let text = "👋 Привет! Я бот для загрузки медиа.\n\n\

@@ -61,13 +61,13 @@ impl Quality {
             Quality::Audio128 => "bestaudio[abr<=128]/bestaudio/best",
             Quality::Audio256 => "bestaudio[abr<=256]/bestaudio/best",
             Quality::AudioBest => "bestaudio/best",
-            Quality::Video360p => "bestvideo[height<=360]+bestaudio/best[height<=360]",
-            Quality::Video480p => "bestvideo[height<=480]+bestaudio/best[height<=480]",
-            Quality::Video720p => "bestvideo[height<=720]+bestaudio/best[height<=720]",
-            Quality::Video1080p => "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
-            Quality::Video1440p => "bestvideo[height<=1440]+bestaudio/best[height<=1440]",
-            Quality::Video4K => "bestvideo[height<=2160]+bestaudio/best[height<=2160]",
-            Quality::Best => "bestvideo+bestaudio/best",
+            Quality::Video360p => "bestvideo[height<=360][vcodec^=avc]+bestaudio[acodec^=mp4a]/bestvideo[height<=360]+bestaudio/best[height<=360]",
+            Quality::Video480p => "bestvideo[height<=480][vcodec^=avc]+bestaudio[acodec^=mp4a]/bestvideo[height<=480]+bestaudio/best[height<=480]",
+            Quality::Video720p => "bestvideo[height<=720][vcodec^=avc]+bestaudio[acodec^=mp4a]/bestvideo[height<=720]+bestaudio/best[height<=720]",
+            Quality::Video1080p => "bestvideo[height<=1080][vcodec^=avc]+bestaudio[acodec^=mp4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]",
+            Quality::Video1440p => "bestvideo[height<=1440][vcodec^=avc]+bestaudio[acodec^=mp4a]/bestvideo[height<=1440]+bestaudio/best[height<=1440]",
+            Quality::Video4K => "bestvideo[height<=2160][vcodec^=avc]+bestaudio[acodec^=mp4a]/bestvideo[height<=2160]+bestaudio/best[height<=2160]",
+            Quality::Best => "bestvideo[vcodec^=avc]+bestaudio[acodec^=mp4a]/bestvideo+bestaudio/best",
         }
     }
 

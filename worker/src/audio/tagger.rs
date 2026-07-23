@@ -21,8 +21,15 @@ pub async fn apply_tags(file_path: &str, meta: &SpotifyTrackMeta, cover_data: Op
 
     // lofty operations are synchronous — run in blocking task
     tokio::task::spawn_blocking(move || {
-        let mut tagged_file = lofty::read_from_path(&file_path)
-            .map_err(|e| AppError::Tagging(e.to_string()))?;
+        let temp_path = format!("{}.tmp", file_path);
+        std::fs::copy(&file_path, &temp_path)
+            .map_err(|e| AppError::Tagging(format!("Failed to copy to temp: {}", e)))?;
+
+        let mut tagged_file = lofty::read_from_path(&temp_path)
+            .map_err(|e| {
+                let _ = std::fs::remove_file(&temp_path);
+                AppError::Tagging(e.to_string())
+            })?;
 
         let tag_type = tagged_file.primary_tag_type();
         let tag = match tagged_file.primary_tag_mut() {
@@ -61,8 +68,16 @@ pub async fn apply_tags(file_path: &str, meta: &SpotifyTrackMeta, cover_data: Op
             tag.push_picture(pic);
         }
 
-        tag.save_to_path(&file_path, WriteOptions::default())
-            .map_err(|e| AppError::Tagging(e.to_string()))?;
+        if let Err(e) = tag.save_to_path(&temp_path, WriteOptions::default()) {
+            let _ = std::fs::remove_file(&temp_path);
+            return Err(AppError::Tagging(e.to_string()));
+        }
+
+        std::fs::rename(&temp_path, &file_path)
+            .map_err(|e| {
+                let _ = std::fs::remove_file(&temp_path);
+                AppError::Tagging(format!("Failed to rename temp: {}", e))
+            })?;
 
         Ok::<(), AppError>(())
     })
