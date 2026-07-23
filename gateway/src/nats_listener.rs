@@ -183,7 +183,7 @@ async fn handle_result(bot: &crate::MyBot, res: TaskResult, config: &AppConfig) 
                 }
             }
         }
-        TaskStatus::PlaylistCompleted { files, playlist_title, failed_count } => {
+        TaskStatus::PlaylistCompleted { files, playlist_title: _, failed_count } => {
             use teloxide::types::{InputMedia, InputMediaAudio, InputMediaVideo};
             
             // Chunk files into groups of 10

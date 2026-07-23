@@ -169,6 +169,7 @@ impl SpotifyClient {
         })
     }
 
+    #[allow(dead_code)]
     pub async fn get_playlist_tracks(&self, config: &AppConfig, playlist_id: &str) -> Result<Vec<SpotifyTrackMeta>, AppError> {
         let token = self.ensure_token(config).await?;
         // simplified pagination for example
@@ -217,6 +218,7 @@ impl SpotifyClient {
         Ok(tracks)
     }
 
+    #[allow(dead_code)]
     pub async fn get_album_tracks(&self, _config: &AppConfig, _album_id: &str) -> Result<Vec<SpotifyTrackMeta>, AppError> {
         // Full pagination implementation would mirror get_playlist_tracks
         Ok(vec![])

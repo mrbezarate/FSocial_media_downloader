@@ -11,6 +11,7 @@ pub struct WorkerContext {
     pub config: AppConfig,
     pub nats_client: async_nats::Client,
     pub nats_jetstream: jetstream::Context,
+    #[allow(dead_code)]
     pub redis_pool: deadpool_redis::Pool,
     pub cache: media::cache::MetadataCache,
     pub proxy_pool: media::proxy::ProxyPool,
