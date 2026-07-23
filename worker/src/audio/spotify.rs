@@ -222,6 +222,84 @@ impl SpotifyClient {
         Ok(vec![])
     }
 
+    pub async fn get_playlist_track_urls(&self, config: &AppConfig, playlist_id: &str) -> Result<Vec<String>, AppError> {
+        let token = self.ensure_token(config).await?;
+        let mut urls = Vec::new();
+        let mut url = format!("https://api.spotify.com/v1/playlists/{}/tracks?limit=100", playlist_id);
+
+        loop {
+            let res = self.client.get(&url)
+                .bearer_auth(&token)
+                .send()
+                .await
+                .map_err(|e| AppError::Spotify(e.to_string()))?;
+
+            if !res.status().is_success() {
+                return Err(AppError::Spotify(format!("API error: {}", res.status())));
+            }
+
+            let v: serde_json::Value = res.json().await.map_err(|e| AppError::Spotify(e.to_string()))?;
+            
+            if let Some(items) = v["items"].as_array() {
+                for item in items {
+                    if let Some(track) = item.get("track") {
+                        if let Some(id) = track["id"].as_str() {
+                            let track_url = format!("https://open.spotify.com/track/{}", id);
+                            if !urls.contains(&track_url) {
+                                urls.push(track_url);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let Some(next) = v["next"].as_str() {
+                url = next.to_string();
+            } else {
+                break;
+            }
+        }
+        Ok(urls)
+    }
+
+    pub async fn get_album_track_urls(&self, config: &AppConfig, album_id: &str) -> Result<Vec<String>, AppError> {
+        let token = self.ensure_token(config).await?;
+        let mut urls = Vec::new();
+        let mut url = format!("https://api.spotify.com/v1/albums/{}/tracks?limit=50", album_id);
+
+        loop {
+            let res = self.client.get(&url)
+                .bearer_auth(&token)
+                .send()
+                .await
+                .map_err(|e| AppError::Spotify(e.to_string()))?;
+
+            if !res.status().is_success() {
+                return Err(AppError::Spotify(format!("API error: {}", res.status())));
+            }
+
+            let v: serde_json::Value = res.json().await.map_err(|e| AppError::Spotify(e.to_string()))?;
+            
+            if let Some(items) = v["items"].as_array() {
+                for track in items {
+                    if let Some(id) = track["id"].as_str() {
+                        let track_url = format!("https://open.spotify.com/track/{}", id);
+                        if !urls.contains(&track_url) {
+                            urls.push(track_url);
+                        }
+                    }
+                }
+            }
+
+            if let Some(next) = v["next"].as_str() {
+                url = next.to_string();
+            } else {
+                break;
+            }
+        }
+        Ok(urls)
+    }
+
     pub fn parse_spotify_url(url: &str) -> Option<(SpotifyType, String)> {
         let re = regex::Regex::new(r"open\.spotify\.com/(track|album|playlist)/([a-zA-Z0-9]+)").unwrap();
         if let Some(caps) = re.captures(url) {

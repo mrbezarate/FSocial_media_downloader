@@ -156,12 +156,20 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                                     }
                                     
                                     if is_playlist {
-                                        let re = regex::Regex::new(r"spotify:track:([a-zA-Z0-9]+)").unwrap();
-                                        for cap in re.captures_iter(&html) {
-                                            if let Some(id) = cap.get(1) {
-                                                let track_url = format!("https://open.spotify.com/track/{}", id.as_str());
-                                                if !playlist_urls.contains(&track_url) {
-                                                    playlist_urls.push(track_url);
+                                        if let Some((stype, sid)) = crate::audio::spotify::SpotifyClient::parse_spotify_url(&req.url) {
+                                            let mut urls = vec![];
+                                            if stype == crate::audio::spotify::SpotifyType::Playlist {
+                                                if let Ok(u) = spotify_client.get_playlist_track_urls(&ctx_info.config, &sid).await {
+                                                    urls = u;
+                                                }
+                                            } else if stype == crate::audio::spotify::SpotifyType::Album {
+                                                if let Ok(u) = spotify_client.get_album_track_urls(&ctx_info.config, &sid).await {
+                                                    urls = u;
+                                                }
+                                            }
+                                            for u in urls {
+                                                if !playlist_urls.contains(&u) {
+                                                    playlist_urls.push(u);
                                                 }
                                             }
                                         }
@@ -363,11 +371,34 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                 }
             });
 
-            let urls_to_process = if let Some(ref urls) = task.playlist_urls {
+            let mut urls_to_process = if let Some(ref urls) = task.playlist_urls {
                 urls.clone()
             } else {
                 vec![task.url.clone()]
             };
+
+            // Expand Spotify playlists if not already expanded (e.g. from group chat direct download)
+            if task.platform == Platform::Spotify && urls_to_process.len() == 1 {
+                let url = &urls_to_process[0];
+                if url.contains("/playlist/") || url.contains("/album/") {
+                    if let Some((stype, sid)) = audio::spotify::SpotifyClient::parse_spotify_url(url) {
+                        let spotify_client = audio::spotify::SpotifyClient::new();
+                        let mut expanded = Vec::new();
+                        if stype == audio::spotify::SpotifyType::Playlist {
+                            if let Ok(u) = spotify_client.get_playlist_track_urls(&ctx_clone.config, &sid).await {
+                                expanded = u;
+                            }
+                        } else if stype == audio::spotify::SpotifyType::Album {
+                            if let Ok(u) = spotify_client.get_album_track_urls(&ctx_clone.config, &sid).await {
+                                expanded = u;
+                            }
+                        }
+                        if !expanded.is_empty() {
+                            urls_to_process = expanded;
+                        }
+                    }
+                }
+            }
             let total = urls_to_process.len();
             let is_playlist_mode = total > 1;
             
