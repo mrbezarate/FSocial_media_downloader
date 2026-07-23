@@ -16,6 +16,7 @@ mod ui;
 mod url_parser;
 
 pub type UrlCache = Arc<Mutex<HashMap<String, String>>>;
+pub type TaskStates = Arc<Mutex<HashMap<String, String>>>;
 
 pub type MyBot = teloxide::adaptors::CacheMe<teloxide::adaptors::Throttle<teloxide::Bot>>;
 
@@ -64,13 +65,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let nats_clone = nats_client.clone();
     let config_clone = config.clone();
     
+    let url_cache: UrlCache = Arc::new(Mutex::new(HashMap::new()));
+    let task_states: TaskStates = Arc::new(Mutex::new(HashMap::new()));
+
+    let ts_clone = task_states.clone();
     tokio::spawn(async move {
-        nats_listener::listen(bot_clone, nats_clone, config_clone).await;
+        nats_listener::listen(bot_clone, nats_clone, config_clone, ts_clone).await;
     });
 
     info!("NATS listener started. Setting up Telegram handlers...");
-
-    let url_cache: UrlCache = Arc::new(Mutex::new(HashMap::new()));
 
     let handler = Update::filter_message()
         .branch(
@@ -85,7 +88,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let callback_handler = Update::filter_callback_query().endpoint(handlers::callback::handle);
 
     let mut dispatcher = Dispatcher::builder(bot.clone(), dptree::entry().branch(handler).branch(callback_handler))
-        .dependencies(dptree::deps![nats_client.clone(), config.clone(), url_cache.clone()])
+        .dependencies(dptree::deps![nats_client.clone(), config.clone(), url_cache.clone(), task_states.clone()])
         .enable_ctrlc_handler()
         .build();
 

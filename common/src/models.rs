@@ -319,6 +319,21 @@ pub mod subjects {
     pub const DLQ: &str = "tasks.dlq";
     /// Subject for info requests (Gateway → Workers, request-reply via plain NATS)
     pub const INFO_REQUEST: &str = "tasks.info";
+    /// Subject for cancel/pause/resume commands
+    pub const TASK_COMMANDS: &str = "tasks.commands";
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub enum TaskCommandAction {
+    Pause,
+    Resume,
+    Abort,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TaskCommand {
+    pub task_id: String,
+    pub action: TaskCommandAction,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

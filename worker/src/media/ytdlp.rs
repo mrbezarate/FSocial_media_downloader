@@ -169,6 +169,12 @@ pub async fn download(
             }
         }
     }
+    if let Some(mut t) = thumbnail.take() {
+        if t.contains("ytimg.com") && t.contains("vi_webp") {
+            t = t.replace("vi_webp", "vi").replace(".webp", ".jpg");
+        }
+        thumbnail = Some(t);
+    }
     let uploader = json.get("uploader")
         .or_else(|| json.get("channel"))
         .or_else(|| json.get("uploader_id"))
@@ -258,6 +264,12 @@ pub async fn get_info(config: &AppConfig, url: &str, proxy: Option<&str>) -> Res
                         }
                     }
                 }
+            }
+            if let Some(mut t) = thumbnail.take() {
+                if t.contains("ytimg.com") && t.contains("vi_webp") {
+                    t = t.replace("vi_webp", "vi").replace(".webp", ".jpg");
+                }
+                thumbnail = Some(t);
             }
 
             if let Some(t) = json.get("_type").and_then(|v| v.as_str()) {
@@ -349,6 +361,7 @@ pub async fn get_info(config: &AppConfig, url: &str, proxy: Option<&str>) -> Res
                     Quality::Video480p => Some(480),
                     Quality::Video720p => Some(720),
                     Quality::Video1080p => Some(1080),
+                    Quality::Video1440p => Some(1440),
                     Quality::Video4K => Some(2160),
                     _ => None,
                 };
@@ -376,6 +389,7 @@ pub async fn get_info(config: &AppConfig, url: &str, proxy: Option<&str>) -> Res
                 if let Some(d) = duration_secs {
                     let rate_mb_per_sec = match q {
                         Quality::Video4K => 4.0,
+                        Quality::Video1440p => 2.5,
                         Quality::Video1080p => 1.5,
                         Quality::Video720p => 0.8,
                         Quality::Video480p => 0.4,

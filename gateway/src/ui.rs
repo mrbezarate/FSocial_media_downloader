@@ -7,10 +7,23 @@ impl UiBuilder {
     pub fn build_info_message(info: &InfoResponse) -> String {
         if info.is_playlist {
             let safe_title = html_escape(&info.title);
+            let mut dur_str = String::new();
+            if let Some(dur) = info.duration_secs {
+                let hours = dur / 3600;
+                let minutes = (dur % 3600) / 60;
+                let seconds = dur % 60;
+                let d_str = if hours > 0 {
+                    format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
+                } else {
+                    format!("{:02}:{:02}", minutes, seconds)
+                };
+                dur_str = format!("\n\n⏱ <b>Длительность: {}</b>", d_str);
+            }
             return format!(
-                "📁 <b>{}</b> →\n\n<i>Всего элементов: {}</i>\n\nФорматы для скачивания ↓",
+                "📁 <b>{}</b> →\n\n<i>Всего элементов: {}</i>{}\n\nФорматы для скачивания ↓",
                 safe_title,
-                info.playlist_count.unwrap_or(0)
+                info.playlist_count.unwrap_or(0),
+                dur_str
             );
         }
 
@@ -21,6 +34,18 @@ impl UiBuilder {
             if !author.is_empty() {
                 lines.push(format!("👤 <b>{}</b> →", html_escape(author)));
             }
+        }
+
+        if let Some(dur) = info.duration_secs {
+            let hours = dur / 3600;
+            let minutes = (dur % 3600) / 60;
+            let seconds = dur % 60;
+            let d_str = if hours > 0 {
+                format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
+            } else {
+                format!("{:02}:{:02}", minutes, seconds)
+            };
+            lines.push(format!("⏱ <b>Длительность: {}</b> →", d_str));
         }
 
         lines.push(String::new());

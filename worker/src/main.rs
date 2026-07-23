@@ -35,6 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         redis_pool,
         cache,
         proxy_pool,
+        task_states: std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
     });
 
     let ctx_clone = worker_ctx.clone();

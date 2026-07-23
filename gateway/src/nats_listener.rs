@@ -6,7 +6,7 @@ use tracing::{error, info};
 
 use crate::nats_client::NatsClient;
 
-pub async fn listen(bot: crate::MyBot, nats: NatsClient, config: AppConfig) {
+pub async fn listen(bot: crate::MyBot, nats: NatsClient, config: AppConfig, task_states: crate::TaskStates) {
     let mut results_sub = nats.subscribe_results().await.expect("Results sub failed");
     let mut progress_sub = nats.subscribe_progress().await.expect("Progress sub failed");
 
@@ -19,7 +19,7 @@ pub async fn listen(bot: crate::MyBot, nats: NatsClient, config: AppConfig) {
             }
             Some(msg) = progress_sub.next() => {
                 if let Ok(res) = serde_json::from_slice::<TaskResult>(&msg.payload) {
-                    handle_progress(&bot, res).await;
+                    handle_progress(&bot, res, &task_states).await;
                 }
             }
         }
@@ -258,7 +258,13 @@ async fn handle_result(bot: &crate::MyBot, res: TaskResult, config: &AppConfig) 
     }
 }
 
-async fn handle_progress(bot: &crate::MyBot, res: TaskResult) {
+async fn handle_progress(bot: &crate::MyBot, res: TaskResult, task_states: &crate::TaskStates) {
+    let is_paused = {
+        let ts = task_states.lock().await;
+        ts.get(&res.task_id).map(|s| s.as_str()) == Some("paused")
+    };
+    if is_paused { return; }
+
     match res.status {
         TaskStatus::Progress { percent: _, status_text } => {
             if let Some(msg_id) = res.status_message_id {
@@ -272,9 +278,12 @@ async fn handle_progress(bot: &crate::MyBot, res: TaskResult) {
         TaskStatus::PlaylistProgress { completed, total, status_text } => {
             if let Some(msg_id) = res.status_message_id {
                 let text = format!("⏳ Скачивание плейлиста: {}/{}\n{}", completed, total, status_text);
-
-                if let Err(_) = bot.edit_message_text(teloxide::types::ChatId(res.chat_id), teloxide::types::MessageId(msg_id), text.clone()).await {
-                    let _ = bot.edit_message_caption(teloxide::types::ChatId(res.chat_id), teloxide::types::MessageId(msg_id)).caption(text).await;
+                let keyboard = teloxide::types::InlineKeyboardMarkup::new(vec![vec![
+                    teloxide::types::InlineKeyboardButton::callback("⏸ Отменить (Пауза)", format!("pause|{}", res.task_id))
+                ]]);
+                
+                if let Err(_) = bot.edit_message_text(teloxide::types::ChatId(res.chat_id), teloxide::types::MessageId(msg_id), text.clone()).reply_markup(keyboard.clone()).await {
+                    let _ = bot.edit_message_caption(teloxide::types::ChatId(res.chat_id), teloxide::types::MessageId(msg_id)).caption(text).reply_markup(keyboard).await;
                 }
             }
         },

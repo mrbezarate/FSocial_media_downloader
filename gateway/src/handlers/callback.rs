@@ -10,12 +10,43 @@ pub async fn handle(
     nats: NatsClient,
     _config: AppConfig,
     url_cache: UrlCache,
+    task_states: crate::TaskStates,
 ) -> ResponseResult<()> {
     if let Some(data) = &q.data {
         let parts: Vec<&str> = data.splitn(2, '|').collect();
         if parts.len() == 2 {
-            let quality_str = parts[0];
-            let short_id = parts[1];
+            let action = parts[0];
+            let target = parts[1];
+            
+            if action == "pause" || action == "resume" || action == "abort" {
+                if let Some(msg) = q.message {
+                    if action == "pause" {
+                        task_states.lock().await.insert(target.to_string(), "paused".to_string());
+                        let keyboard = teloxide::types::InlineKeyboardMarkup::new(vec![vec![
+                            teloxide::types::InlineKeyboardButton::callback("▶️ Продолжить", format!("resume|{}", target)),
+                            teloxide::types::InlineKeyboardButton::callback("🛑 Прервать", format!("abort|{}", target)),
+                        ]]);
+                        let _ = bot.edit_message_reply_markup(msg.chat().id, msg.id()).reply_markup(keyboard).await;
+                        let _ = nats.publish_command(&fsocial_common::TaskCommand { task_id: target.to_string(), action: fsocial_common::TaskCommandAction::Pause }).await;
+                    } else if action == "resume" {
+                        task_states.lock().await.insert(target.to_string(), "running".to_string());
+                        let keyboard = teloxide::types::InlineKeyboardMarkup::new(vec![vec![
+                            teloxide::types::InlineKeyboardButton::callback("⏸ Отменить (Пауза)", format!("pause|{}", target))
+                        ]]);
+                        let _ = bot.edit_message_reply_markup(msg.chat().id, msg.id()).reply_markup(keyboard).await;
+                        let _ = nats.publish_command(&fsocial_common::TaskCommand { task_id: target.to_string(), action: fsocial_common::TaskCommandAction::Resume }).await;
+                    } else if action == "abort" {
+                        task_states.lock().await.insert(target.to_string(), "aborted".to_string());
+                        let _ = bot.edit_message_text(msg.chat().id, msg.id(), "🛑 Скачивание прервано пользователем.").reply_markup(teloxide::types::InlineKeyboardMarkup::default()).await;
+                        let _ = nats.publish_command(&fsocial_common::TaskCommand { task_id: target.to_string(), action: fsocial_common::TaskCommandAction::Abort }).await;
+                    }
+                }
+                bot.answer_callback_query(q.id).await?;
+                return Ok(());
+            }
+
+            let quality_str = action;
+            let short_id = target;
             
             // Retrieve actual URL from cache
             let original_url = url_cache.lock().await.remove(short_id);

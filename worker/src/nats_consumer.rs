@@ -15,6 +15,7 @@ pub struct WorkerContext {
     pub redis_pool: deadpool_redis::Pool,
     pub cache: media::cache::MetadataCache,
     pub proxy_pool: media::proxy::ProxyPool,
+    pub task_states: Arc<tokio::sync::RwLock<std::collections::HashMap<String, fsocial_common::TaskCommandAction>>>,
 }
 
 pub async fn publish_result(client: &async_nats::Client, result: &TaskResult) {
@@ -168,6 +169,15 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                                                     urls = u;
                                                 }
                                             }
+                                            
+                                            // Fallback to yt-dlp if Spotify API fails (e.g. no credentials)
+                                            if urls.is_empty() {
+                                                tracing::warn!("Spotify API returned 0 tracks. Falling back to yt-dlp...");
+                                                if let Ok(info) = media::ytdlp::get_info(&ctx_info.config, &req.url, ctx_info.proxy_pool.next()).await {
+                                                    urls = info.playlist_urls;
+                                                }
+                                            }
+
                                             for u in urls {
                                                 if !playlist_urls.contains(&u) {
                                                     playlist_urls.push(u);
@@ -250,6 +260,19 @@ pub async fn run(ctx: Arc<WorkerContext>) {
                         let payload = serde_json::to_vec(&reply_data).unwrap();
                         let _ = ctx_info.nats_client.publish(reply, payload.into()).await;
                     }
+                }
+            }
+        });
+    }
+
+    let cancel_sub = ctx.nats_client.subscribe(fsocial_common::subjects::TASK_COMMANDS.to_string()).await;
+    if let Ok(mut sub) = cancel_sub {
+        let task_states_clone = ctx.task_states.clone();
+        tokio::spawn(async move {
+            info!("Listening for TaskCommands...");
+            while let Some(msg) = sub.next().await {
+                if let Ok(cmd) = serde_json::from_slice::<fsocial_common::TaskCommand>(&msg.payload) {
+                    task_states_clone.write().await.insert(cmd.task_id.clone(), cmd.action);
                 }
             }
         });
@@ -408,6 +431,29 @@ pub async fn run(ctx: Arc<WorkerContext>) {
 
             for (idx, url) in urls_to_process.iter().enumerate() {
                 if is_playlist_mode {
+                    let mut is_aborted = false;
+                    loop {
+                        let state = {
+                            let states = ctx_clone.task_states.read().await;
+                            states.get(&task.task_id).cloned()
+                        };
+                        match state {
+                            Some(fsocial_common::TaskCommandAction::Abort) => {
+                                is_aborted = true;
+                                break;
+                            }
+                            Some(fsocial_common::TaskCommandAction::Pause) => {
+                                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                                continue;
+                            }
+                            _ => break,
+                        }
+                    }
+                    if is_aborted {
+                        first_error = Some(fsocial_common::AppError::Download("Скачивание прервано пользователем".into()));
+                        break;
+                    }
+
                     let _ = tx.send(fsocial_common::ProgressEvent::NewTrack(idx, total)).await;
                 }
                 

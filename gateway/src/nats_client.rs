@@ -67,4 +67,11 @@ impl NatsClient {
         }
         Ok(info_res)
     }
+
+    pub async fn publish_command(&self, cmd: &fsocial_common::TaskCommand) -> Result<(), AppError> {
+        let payload = serde_json::to_vec(cmd).map_err(|e| AppError::Nats(e.to_string()))?;
+        self.client.publish(fsocial_common::subjects::TASK_COMMANDS.to_string(), payload.into())
+            .await
+            .map_err(|e| AppError::Nats(e.to_string()))
+    }
 }
