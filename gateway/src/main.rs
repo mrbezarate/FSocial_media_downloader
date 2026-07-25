@@ -93,8 +93,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
     let callback_handler = Update::filter_callback_query().endpoint(handlers::callback::handle);
+    let inline_handler = Update::filter_inline_query().endpoint(handlers::inline::handle);
 
-    let mut dispatcher = Dispatcher::builder(bot.clone(), dptree::entry().branch(handler).branch(callback_handler))
+    let mut dispatcher = Dispatcher::builder(bot.clone(), dptree::entry().branch(handler).branch(callback_handler).branch(inline_handler))
         .dependencies(dptree::deps![nats_client.clone(), config.clone(), url_cache.clone(), task_states.clone(), redis_pool.clone()])
         .enable_ctrlc_handler()
         .build();

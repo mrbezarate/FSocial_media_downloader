@@ -92,7 +92,7 @@ async fn handle_result(bot: &crate::MyBot, res: TaskResult, config: &AppConfig, 
 
                     let bot_watermark = "\n\nСкачано с помощью бота @FSocial_Media_Downloader_bot";
                     let media = if is_audio {
-                        let mut aud = teloxide::types::InputMediaAudio::new(input_file).title(title.clone()).caption(format!("{}{}", title, bot_watermark));
+                        let mut aud = teloxide::types::InputMediaAudio::new(input_file).title(title.clone()).caption(bot_watermark.trim_start().to_string());
                         if let Some(perf) = &performer {
                             aud.performer = Some(perf.clone());
                         }
@@ -146,7 +146,7 @@ async fn handle_result(bot: &crate::MyBot, res: TaskResult, config: &AppConfig, 
 
                 let bot_watermark = "\n\nСкачано с помощью бота @FSocial_Media_Downloader_bot";
                 let api_res = if is_audio {
-                    let mut req = bot.send_audio(chat_id, input_file).title(title.clone()).caption(format!("{}{}", title, bot_watermark));
+                    let mut req = bot.send_audio(chat_id, input_file).title(title.clone()).caption(bot_watermark.trim_start().to_string());
                     if let Some(perf) = &performer {
                         req = req.performer(perf.clone());
                     }

@@ -103,7 +103,7 @@ pub async fn handle(
             let bot_watermark = "\n\nСкачано с помощью бота @FSocial_Media_Downloader_bot";
             let send_res = if task.media_type == fsocial_common::MediaType::Audio {
                 bot.send_audio(msg.chat.id, input_file)
-                    .caption(bot_watermark)
+                    .caption(bot_watermark.trim_start())
                     .reply_parameters(teloxide::types::ReplyParameters::new(msg.id))
                     .await
             } else {

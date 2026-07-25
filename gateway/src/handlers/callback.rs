@@ -226,7 +226,7 @@ pub async fn handle(
                             
                             let send_res = if task.quality.is_audio() {
                                 bot.send_audio(chat, input_file)
-                                    .caption(bot_watermark)
+                                    .caption(bot_watermark.trim_start())
                                     .await
                             } else {
                                 bot.send_video(chat, input_file)
