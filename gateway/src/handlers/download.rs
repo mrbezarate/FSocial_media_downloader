@@ -159,7 +159,7 @@ pub async fn handle(
                     return Ok(());
                 }
 
-                let max_size = if config.is_local_api() { 1024.0 } else { 50.0 };
+                let max_size = if config.is_local_api() { 2000.0 } else { 50.0 };
                 let text = crate::ui::UiBuilder::build_info_message(&info, max_size);
                 let keyboard = crate::ui::UiBuilder::build_quality_keyboard(&info, &short_id, max_size);
 
