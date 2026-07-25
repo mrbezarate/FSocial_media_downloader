@@ -89,13 +89,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .endpoint(commands::handle),
         )
         .branch(
+            dptree::filter(|msg: Message| msg.successful_payment().is_some())
+                .endpoint(handlers::payments::handle_successful_payment),
+        )
+        .branch(
             dptree::filter(url_parser::contains_url).endpoint(handlers::download::handle),
         );
 
     let callback_handler = Update::filter_callback_query().endpoint(handlers::callback::handle);
     let inline_handler = Update::filter_inline_query().endpoint(handlers::inline::handle);
+    let pre_checkout_handler = Update::filter_pre_checkout_query().endpoint(handlers::payments::handle_pre_checkout_query);
 
-    let mut dispatcher = Dispatcher::builder(bot.clone(), dptree::entry().branch(handler).branch(callback_handler).branch(inline_handler))
+    let mut dispatcher = Dispatcher::builder(bot.clone(), dptree::entry().branch(handler).branch(callback_handler).branch(inline_handler).branch(pre_checkout_handler))
         .dependencies(dptree::deps![nats_client.clone(), config.clone(), url_cache.clone(), task_states.clone(), redis_pool.clone()])
         .enable_ctrlc_handler()
         .build();

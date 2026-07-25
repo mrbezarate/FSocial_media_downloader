@@ -4,7 +4,7 @@ use fsocial_common::{AppError, DownloadTask};
 
 #[derive(Clone)]
 pub struct NatsClient {
-    client: async_nats::Client,
+    pub client: async_nats::Client,
     pub jetstream: Context,
 }
 

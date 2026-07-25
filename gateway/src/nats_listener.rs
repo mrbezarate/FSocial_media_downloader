@@ -23,8 +23,9 @@ pub async fn listen(
                     let bot_clone = bot.clone();
                     let config_clone = config.clone();
                     let redis_pool_clone = redis_pool.clone();
+                    let nats_clone = nats.clone();
                     tokio::spawn(async move {
-                        handle_result(&bot_clone, res, &config_clone, &redis_pool_clone).await;
+                        handle_result(&bot_clone, res, &config_clone, &redis_pool_clone, &nats_clone).await;
                     });
                 }
             }
@@ -37,7 +38,7 @@ pub async fn listen(
     }
 }
 
-async fn handle_result(bot: &crate::MyBot, res: TaskResult, config: &AppConfig, redis_pool: &deadpool_redis::Pool) {
+async fn handle_result(bot: &crate::MyBot, res: TaskResult, config: &AppConfig, redis_pool: &deadpool_redis::Pool, nats: &crate::NatsClient) {
     let chat_id = teloxide::types::ChatId(res.chat_id);
 
     match res.status {
@@ -364,13 +365,18 @@ async fn handle_result(bot: &crate::MyBot, res: TaskResult, config: &AppConfig, 
                 }
             }
         }
-        TaskStatus::Failed { error, .. } => {
+        TaskStatus::Failed { ref error, retryable } => {
             if let Some(msg_id) = res.status_message_id {
                 let mid = teloxide::types::MessageId(msg_id);
                 let err_msg = format!("❌ Ошибка: {}", error);
                 if let Err(_) = bot.edit_message_text(chat_id, mid, err_msg.clone()).await {
                     let _ = bot.edit_message_caption(chat_id, mid).caption(err_msg).await;
                 }
+            }
+            if !retryable {
+                let payload = serde_json::to_vec(&res).unwrap();
+                let _ = nats.client.publish(fsocial_common::subjects::DLQ.to_string(), payload.into()).await;
+                tracing::error!("Task {} failed permanently. Sent to DLQ. Error: {}", res.task_id, error);
             }
         }
         _ => {}
