@@ -368,7 +368,30 @@ pub async fn run(ctx: Arc<WorkerContext>, mut shutdown_rx: tokio::sync::watch::R
                             };
 
                             match result {
-                                Ok(res) => return (idx, url.clone(), Ok(res)),
+                                Ok(res) => {
+                                    let path = std::path::PathBuf::from(&res.0);
+                                    if let Ok(meta) = tokio::fs::metadata(&path).await {
+                                        let size_mb = meta.len() as f64 / (1024.0 * 1024.0);
+                                        if size_mb > 50.0 && !ctx_clone.config.is_local_api() {
+                                            let _ = tokio::fs::remove_file(&path).await;
+                                            if let Some(thumb) = &res.4 {
+                                                let _ = tokio::fs::remove_file(thumb).await;
+                                            }
+                                            
+                                            if let Some(lower_quality) = current_task.quality.downgrade() {
+                                                tracing::info!("File too big ({:.1}MB), downgrading from {:?} to {:?}", size_mb, current_task.quality, lower_quality);
+                                                let _ = tx_clone.send(fsocial_common::ProgressEvent::Line(format!("⚠️ Слишком большой файл ({:.1}MB). Пробуем качество ниже...", size_mb))).await;
+                                                current_task.quality = lower_quality;
+                                                attempts = 0;
+                                                continue;
+                                            } else {
+                                                final_err = Some(fsocial_common::AppError::Download(format!("Файл слишком большой ({:.1} МБ). Понижение качества невозможно.", size_mb)));
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    return (idx, url.clone(), Ok((res.0, res.1, res.2, res.3, res.4, current_task.quality.clone())))
+                                },
                                 Err(e) => {
                                     if !e.is_retryable() || attempts >= max_attempts {
                                         final_err = Some(e);
@@ -385,9 +408,9 @@ pub async fn run(ctx: Arc<WorkerContext>, mut shutdown_rx: tokio::sync::watch::R
 
             while let Some((_idx, url, res)) = stream.next().await {
                 match res {
-                    Ok((file_path, title, duration_secs, performer, thumb_path)) => {
-                        let cache_key = Some(format!("file_id:{}:{}", task.quality.callback_id(), url));
-                        completed_files.push((file_path, title, duration_secs, performer, thumb_path, task.quality.is_audio(), cache_key));
+                    Ok((file_path, title, duration_secs, performer, thumb_path, final_quality)) => {
+                        let cache_key = Some(format!("file_id:{}:{}", final_quality.callback_id(), url));
+                        completed_files.push((file_path, title, duration_secs, performer, thumb_path, final_quality.is_audio(), cache_key));
                     }
                     Err(e) => {
                         if first_error.is_none() {

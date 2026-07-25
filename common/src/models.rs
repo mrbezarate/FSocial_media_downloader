@@ -1,6 +1,23 @@
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserSettings {
+    pub default_video: Quality,
+    pub default_audio: Quality,
+    pub quiet_mode: bool,
+}
+
+impl Default for UserSettings {
+    fn default() -> Self {
+        Self {
+            default_video: Quality::Best,
+            default_audio: Quality::AudioBest,
+            quiet_mode: false,
+        }
+    }
+}
+
 // ─── Platform Detection ──────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -145,6 +162,21 @@ impl Quality {
 
     pub fn is_audio(&self) -> bool {
         matches!(self, Quality::Audio128 | Quality::Audio256 | Quality::AudioBest)
+    }
+
+    pub fn downgrade(&self) -> Option<Quality> {
+        match self {
+            Quality::Best => Some(Quality::Video1080p),
+            Quality::Video4K => Some(Quality::Video1440p),
+            Quality::Video1440p => Some(Quality::Video1080p),
+            Quality::Video1080p => Some(Quality::Video720p),
+            Quality::Video720p => Some(Quality::Video480p),
+            Quality::Video480p => Some(Quality::Video360p),
+            Quality::Video360p => None,
+            Quality::AudioBest => Some(Quality::Audio256),
+            Quality::Audio256 => Some(Quality::Audio128),
+            Quality::Audio128 => None,
+        }
     }
 }
 

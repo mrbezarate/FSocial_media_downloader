@@ -19,7 +19,7 @@ pub async fn handle(
     bot: crate::MyBot,
     msg: Message,
     nats: NatsClient,
-    config: AppConfig,
+    _config: AppConfig,
     url_cache: UrlCache,
     redis_pool: deadpool_redis::Pool,
 ) -> ResponseResult<()> {
@@ -48,15 +48,26 @@ pub async fn handle(
     let chat_id = msg.chat.id.0;
     let message_id = msg.id.0;
 
-    let bypass_info = is_group || url_match.platform == fsocial_common::Platform::Pinterest;
+    let mut settings = fsocial_common::UserSettings::default();
+    if let Ok(mut conn) = redis_pool.get().await {
+        let key = format!("user_settings:{}", user_id);
+        let res: redis::RedisResult<String> = redis::cmd("GET").arg(&key).query_async(&mut conn).await;
+        if let Ok(val) = res {
+            if let Ok(parsed) = serde_json::from_str::<fsocial_common::UserSettings>(&val) {
+                settings = parsed;
+            }
+        }
+    }
+
+    let bypass_info = is_group || url_match.platform == fsocial_common::Platform::Pinterest || settings.quiet_mode;
 
     if bypass_info {
         let default_quality = if url_match.platform == fsocial_common::Platform::Pinterest {
             fsocial_common::Quality::Best
         } else if url_match.media_type == fsocial_common::MediaType::Audio {
-            config.default_audio_quality.clone()
+            settings.default_audio
         } else {
-            config.default_video_quality.clone()
+            settings.default_video
         };
 
         let mut task = DownloadTask::new(

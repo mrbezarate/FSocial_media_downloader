@@ -75,7 +75,7 @@ async fn handle_result(bot: &crate::MyBot, res: TaskResult, config: &AppConfig, 
                     return;
                 }
             }
-            let file_name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+            let _file_name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
 
             let mut edit_success = false;
             let mut edit_res_msg = None;

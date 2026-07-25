@@ -15,6 +15,90 @@ pub async fn handle(
 ) -> ResponseResult<()> {
     if let Some(data) = &q.data {
         let parts: Vec<&str> = data.splitn(2, '|').collect();
+        
+        if parts[0].starts_with("set_") || parts[0].starts_with("setmenu") || parts[0].starts_with("settings") {
+            let action = parts[0];
+            let target = if parts.len() > 1 { parts[1] } else { "" };
+            let user_id = q.from.id.0;
+            
+            let mut settings = fsocial_common::UserSettings::default();
+            if let Ok(mut conn) = redis_pool.get().await {
+                let key = format!("user_settings:{}", user_id);
+                let res: redis::RedisResult<String> = redis::cmd("GET").arg(&key).query_async(&mut conn).await;
+                if let Ok(val) = res {
+                    if let Ok(parsed) = serde_json::from_str::<fsocial_common::UserSettings>(&val) {
+                        settings = parsed;
+                    }
+                }
+                
+                let mut should_save = false;
+                
+                if action == "set_quiet" {
+                    settings.quiet_mode = !settings.quiet_mode;
+                    should_save = true;
+                } else if action == "setmenu" {
+                    if let Some(msg) = q.message.as_ref() {
+                        use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
+                        let mut btns = Vec::new();
+                        if target == "vid" {
+                            for chunk in fsocial_common::Quality::video_options().chunks(2) {
+                                let mut row = Vec::new();
+                                for q_opt in chunk {
+                                    row.push(InlineKeyboardButton::callback(format!("{:?}", q_opt), format!("set_vid|{}", q_opt.callback_id())));
+                                }
+                                btns.push(row);
+                            }
+                        } else if target == "aud" {
+                            for chunk in fsocial_common::Quality::audio_options().chunks(2) {
+                                let mut row = Vec::new();
+                                for q_opt in chunk {
+                                    row.push(InlineKeyboardButton::callback(format!("{:?}", q_opt), format!("set_aud|{}", q_opt.callback_id())));
+                                }
+                                btns.push(row);
+                            }
+                        }
+                        btns.push(vec![InlineKeyboardButton::callback("⬅️ Назад", "settings_main")]);
+                        let _ = bot.edit_message_reply_markup(msg.chat().id, msg.id()).reply_markup(InlineKeyboardMarkup::new(btns)).await;
+                    }
+                } else if action == "set_vid" {
+                    if let Some(qual) = Quality::from_callback(target) {
+                        settings.default_video = qual;
+                        should_save = true;
+                    }
+                } else if action == "set_aud" {
+                    if let Some(qual) = Quality::from_callback(target) {
+                        settings.default_audio = qual;
+                        should_save = true;
+                    }
+                } else if action == "settings_main" {
+                    should_save = true; // force redraw
+                }
+                
+                if should_save {
+                    let key = format!("user_settings:{}", user_id);
+                    let val = serde_json::to_string(&settings).unwrap();
+                    let res: redis::RedisResult<()> = redis::cmd("SET").arg(&key).arg(val).query_async(&mut conn).await;
+                    let _ = res;
+                    
+                    if let Some(msg) = q.message.as_ref() {
+                        use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
+                        let vid_text = format!("📹 Видео: {:?}", settings.default_video);
+                        let aud_text = format!("🎵 Аудио: {:?}", settings.default_audio);
+                        let quiet_text = format!("🤫 Тихий режим: {}", if settings.quiet_mode { "ВКЛ" } else { "ВЫКЛ" });
+
+                        let keyboard = InlineKeyboardMarkup::new(vec![
+                            vec![InlineKeyboardButton::callback(vid_text, "setmenu|vid")],
+                            vec![InlineKeyboardButton::callback(aud_text, "setmenu|aud")],
+                            vec![InlineKeyboardButton::callback(quiet_text, "set_quiet")],
+                        ]);
+                        let _ = bot.edit_message_reply_markup(msg.chat().id, msg.id()).reply_markup(keyboard).await;
+                    }
+                }
+            }
+            bot.answer_callback_query(q.id).await?;
+            return Ok(());
+        }
+
         if parts.len() == 2 {
             let action = parts[0];
             let target = parts[1];
