@@ -78,8 +78,7 @@ pub async fn handle(
             }
         }
     }
-
-    let bypass_info = is_group || url_match.platform == fsocial_common::Platform::Pinterest || settings.quiet_mode;
+    let bypass_info = is_group || url_match.platform == fsocial_common::Platform::Pinterest || settings.auto_download;
 
     if bypass_info {
         let default_quality = if url_match.platform == fsocial_common::Platform::Pinterest {

@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 pub struct UserSettings {
     pub default_video: Quality,
     pub default_audio: Quality,
-    pub quiet_mode: bool,
+    pub auto_download: bool,
     pub premium_until: Option<i64>,
 }
 
@@ -14,7 +14,7 @@ impl Default for UserSettings {
         Self {
             default_video: Quality::Best,
             default_audio: Quality::AudioBest,
-            quiet_mode: false,
+            auto_download: false,
             premium_until: None,
         }
     }

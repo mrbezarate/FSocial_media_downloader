@@ -61,14 +61,18 @@ pub async fn handle(bot: crate::MyBot, msg: Message, cmd: Command, redis_pool: d
             
             use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
             
-            let vid_text = format!("📹 Видео: {:?}", settings.default_video);
-            let aud_text = format!("🎵 Аудио: {:?}", settings.default_audio);
-            let quiet_text = format!("🤫 Тихий режим: {}", if settings.quiet_mode { "ВКЛ" } else { "ВЫКЛ" });
+            let vid_text = format!("📹 Качество Видео по умолчанию: {:?}", settings.default_video);
+            let aud_text = format!("🎵 Качество Аудио по умолчанию: {:?}", settings.default_audio);
+            let mode_text = if settings.auto_download {
+                "⚡ Режим: Автоматически (без вопросов)"
+            } else {
+                "💬 Режим: Всегда спрашивать качество"
+            };
 
             let keyboard = InlineKeyboardMarkup::new(vec![
+                vec![InlineKeyboardButton::callback(mode_text, "toggle_mode")],
                 vec![InlineKeyboardButton::callback(vid_text, "setmenu|vid")],
                 vec![InlineKeyboardButton::callback(aud_text, "setmenu|aud")],
-                vec![InlineKeyboardButton::callback(quiet_text, "set_quiet")],
             ]);
 
             bot.send_message(msg.chat.id, text)

@@ -16,7 +16,7 @@ pub async fn handle(
     if let Some(data) = &q.data {
         let parts: Vec<&str> = data.splitn(2, '|').collect();
         
-        if parts[0].starts_with("set_") || parts[0].starts_with("setmenu") || parts[0].starts_with("settings") {
+        if parts[0].starts_with("set_") || parts[0].starts_with("setmenu") || parts[0].starts_with("settings") || parts[0] == "toggle_mode" {
             let action = parts[0];
             let target = if parts.len() > 1 { parts[1] } else { "" };
             let user_id = q.from.id.0;
@@ -33,8 +33,8 @@ pub async fn handle(
                 
                 let mut should_save = false;
                 
-                if action == "set_quiet" {
-                    settings.quiet_mode = !settings.quiet_mode;
+                if action == "toggle_mode" {
+                    settings.auto_download = !settings.auto_download;
                     should_save = true;
                 } else if action == "setmenu" {
                     if let Some(msg) = q.message.as_ref() {
@@ -82,14 +82,18 @@ pub async fn handle(
                     
                     if let Some(msg) = q.message.as_ref() {
                         use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
-                        let vid_text = format!("📹 Видео: {:?}", settings.default_video);
-                        let aud_text = format!("🎵 Аудио: {:?}", settings.default_audio);
-                        let quiet_text = format!("🤫 Тихий режим: {}", if settings.quiet_mode { "ВКЛ" } else { "ВЫКЛ" });
+                        let vid_text = format!("📹 Качество Видео по умолчанию: {:?}", settings.default_video);
+                        let aud_text = format!("🎵 Качество Аудио по умолчанию: {:?}", settings.default_audio);
+                        let mode_text = if settings.auto_download {
+                            "⚡ Режим: Автоматически (без вопросов)"
+                        } else {
+                            "💬 Режим: Всегда спрашивать качество"
+                        };
 
                         let keyboard = InlineKeyboardMarkup::new(vec![
+                            vec![InlineKeyboardButton::callback(mode_text, "toggle_mode")],
                             vec![InlineKeyboardButton::callback(vid_text, "setmenu|vid")],
                             vec![InlineKeyboardButton::callback(aud_text, "setmenu|aud")],
-                            vec![InlineKeyboardButton::callback(quiet_text, "set_quiet")],
                         ]);
                         let _ = bot.edit_message_reply_markup(msg.chat().id, msg.id()).reply_markup(keyboard).await;
                     }
