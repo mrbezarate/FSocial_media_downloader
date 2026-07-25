@@ -4,14 +4,14 @@ use teloxide::prelude::*;
 use crate::{nats_client::NatsClient, url_parser, UrlCache};
 
 const SUPPORTED_SOURCES_INFO: &str = "\
-Ошибка: Ссылка недействительна или источник не поддерживается.\n\n\
+❌ <b>Ошибка: Ссылка недействительна или источник не поддерживается.</b>\n\n\
 Пожалуйста, отправляйте только рабочие ссылки со следующих платформ:\n\n\
-<b>Видео:</b>\n\
+🎬 <b>Видео:</b>\n\
 • YouTube\n\
 • Instagram\n\
 • TikTok\n\
 • Pinterest\n\n\
-<b>Аудио:</b>\n\
+🎵 <b>Аудио:</b>\n\
 • Spotify\n\
 • SoundCloud";
 
@@ -103,7 +103,7 @@ pub async fn handle(
         task.reply_to_message_id = Some(message_id);
 
         let status_msg = bot
-            .send_message(msg.chat.id, "Загрузка...")
+            .send_message(msg.chat.id, "⏳ Загружаю...")
             .reply_parameters(teloxide::types::ReplyParameters::new(msg.id))
             .await?;
 
@@ -142,7 +142,7 @@ pub async fn handle(
 
         if let Err(e) = nats.publish_task(&task).await {
             tracing::error!("Failed to publish task: {}", e);
-            bot.edit_message_text(msg.chat.id, status_msg.id, "Ошибка")
+            bot.edit_message_text(msg.chat.id, status_msg.id, "❌ Ошибка")
                 .await?;
         }
     } else {
@@ -153,7 +153,7 @@ pub async fn handle(
         match nats.request_info(&req).await {
             Ok(info) => {
                 if info.is_playlist && info.playlist_count.unwrap_or(0) > 50 && !is_premium {
-                    let _ = bot.send_message(msg.chat.id, "Бесплатные пользователи могут скачивать плейлисты только до 50 треков. Оформите Premium для снятия ограничений.")
+                    let _ = bot.send_message(msg.chat.id, "❌ Бесплатные пользователи могут скачивать плейлисты только до 50 треков. Оформите Premium для снятия ограничений.")
                         .reply_parameters(teloxide::types::ReplyParameters::new(msg.id))
                         .await;
                     return Ok(());

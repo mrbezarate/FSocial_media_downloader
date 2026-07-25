@@ -16,6 +16,24 @@ pub async fn handle(
     if let Some(data) = &q.data {
         let parts: Vec<&str> = data.splitn(2, '|').collect();
         
+        if parts[0] == "buy_premium" {
+            let title = "Premium Подписка 💎";
+            let description = "Месяц безграничных загрузок: неограниченный трафик, плейлисты любой длины и максимальный приоритет в очереди!";
+            let payload = "premium_1_month";
+            let provider_token = ""; // Оставляем пустым для Telegram Stars
+            let currency = "XTR"; // Telegram Stars
+            let prices = vec![teloxide::types::LabeledPrice {
+                label: "1 Месяц Premium".into(),
+                amount: 500, // 500 звезд
+            }];
+
+            if let Some(msg) = q.message.as_ref() {
+                let _ = bot.send_invoice(msg.chat().id, title, description, payload, currency, prices).await;
+            }
+            let _ = bot.answer_callback_query(q.id).await;
+            return Ok(());
+        }
+
         if parts[0].starts_with("set_") || parts[0].starts_with("setmenu") || parts[0].starts_with("settings") || parts[0] == "toggle_mode" {
             let action = parts[0];
             let target = if parts.len() > 1 { parts[1] } else { "" };
@@ -82,19 +100,19 @@ pub async fn handle(
                     
                     if let Some(msg) = q.message.as_ref() {
                         use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
-                        let vid_text = format!("Формат видео: {:?}", settings.default_video);
-                        let aud_text = format!("Формат аудио: {:?}", settings.default_audio);
-                        let mode_text = if settings.auto_download {
-                            "Режим: Автоматический"
+                        let mut keyboard_rows = Vec::new();
+                        
+                        if settings.auto_download {
+                            keyboard_rows.push(vec![InlineKeyboardButton::callback("⚡ Авто", "toggle_mode")]);
+                            keyboard_rows.push(vec![InlineKeyboardButton::callback(format!("📹 Видео: {:?}", settings.default_video), "setmenu|vid")]);
+                            keyboard_rows.push(vec![InlineKeyboardButton::callback(format!("🎵 Аудио: {:?}", settings.default_audio), "setmenu|aud")]);
                         } else {
-                            "Режим: Ручной выбор"
-                        };
+                            keyboard_rows.push(vec![InlineKeyboardButton::callback("💬 Ручной", "toggle_mode")]);
+                        }
+                        
+                        keyboard_rows.push(vec![InlineKeyboardButton::callback("💎 Premium", "buy_premium")]);
 
-                        let keyboard = InlineKeyboardMarkup::new(vec![
-                            vec![InlineKeyboardButton::callback(mode_text, "toggle_mode")],
-                            vec![InlineKeyboardButton::callback(vid_text, "setmenu|vid")],
-                            vec![InlineKeyboardButton::callback(aud_text, "setmenu|aud")],
-                        ]);
+                        let keyboard = InlineKeyboardMarkup::new(keyboard_rows);
                         let _ = bot.edit_message_reply_markup(msg.chat().id, msg.id()).reply_markup(keyboard).await;
                     }
                 }
@@ -112,21 +130,21 @@ pub async fn handle(
                     if action == "pause" {
                         task_states.insert(target.to_string(), "paused".to_string()).await;
                         let keyboard = teloxide::types::InlineKeyboardMarkup::new(vec![vec![
-                            teloxide::types::InlineKeyboardButton::callback("[ Продолжить ]", format!("resume|{}", target)),
-                            teloxide::types::InlineKeyboardButton::callback("[ Отмена ]", format!("abort|{}", target)),
+                            teloxide::types::InlineKeyboardButton::callback("▶️ Продолжить", format!("resume|{}", target)),
+                            teloxide::types::InlineKeyboardButton::callback("🛑 Отмена", format!("abort|{}", target)),
                         ]]);
                         let _ = bot.edit_message_reply_markup(msg.chat().id, msg.id()).reply_markup(keyboard).await;
                         let _ = nats.publish_command(&fsocial_common::TaskCommand { task_id: target.to_string(), action: fsocial_common::TaskCommandAction::Pause }).await;
                     } else if action == "resume" {
                         task_states.insert(target.to_string(), "running".to_string()).await;
                         let keyboard = teloxide::types::InlineKeyboardMarkup::new(vec![vec![
-                            teloxide::types::InlineKeyboardButton::callback("[ Пауза ]", format!("pause|{}", target))
+                            teloxide::types::InlineKeyboardButton::callback("⏸ Пауза", format!("pause|{}", target))
                         ]]);
                         let _ = bot.edit_message_reply_markup(msg.chat().id, msg.id()).reply_markup(keyboard).await;
                         let _ = nats.publish_command(&fsocial_common::TaskCommand { task_id: target.to_string(), action: fsocial_common::TaskCommandAction::Resume }).await;
                     } else if action == "abort" {
                         task_states.insert(target.to_string(), "aborted".to_string()).await;
-                        let _ = bot.edit_message_text(msg.chat().id, msg.id(), "Скачивание прервано пользователем.").reply_markup(teloxide::types::InlineKeyboardMarkup::default()).await;
+                        let _ = bot.edit_message_text(msg.chat().id, msg.id(), "🛑 Скачивание прервано пользователем.").reply_markup(teloxide::types::InlineKeyboardMarkup::default()).await;
                         let _ = nats.publish_command(&fsocial_common::TaskCommand { task_id: target.to_string(), action: fsocial_common::TaskCommandAction::Abort }).await;
                     }
                 }
