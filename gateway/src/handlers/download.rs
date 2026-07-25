@@ -19,7 +19,7 @@ pub async fn handle(
     bot: crate::MyBot,
     msg: Message,
     nats: NatsClient,
-    _config: AppConfig,
+    config: AppConfig,
     url_cache: UrlCache,
     redis_pool: deadpool_redis::Pool,
 ) -> ResponseResult<()> {
@@ -132,8 +132,9 @@ pub async fn handle(
 
         match nats.request_info(&req).await {
             Ok(info) => {
-                let text = crate::ui::UiBuilder::build_info_message(&info);
-                let keyboard = crate::ui::UiBuilder::build_quality_keyboard(&info, &short_id);
+                let max_size = if config.is_local_api() { 1024.0 } else { 50.0 };
+                let text = crate::ui::UiBuilder::build_info_message(&info, max_size);
+                let keyboard = crate::ui::UiBuilder::build_quality_keyboard(&info, &short_id, max_size);
 
                 let mut sent_photo = false;
                 if let Some(thumb_url) = info.thumbnail {

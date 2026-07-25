@@ -4,7 +4,7 @@ use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
 pub struct UiBuilder;
 
 impl UiBuilder {
-    pub fn build_info_message(info: &InfoResponse) -> String {
+    pub fn build_info_message(info: &InfoResponse, max_size_mb: f64) -> String {
         if info.is_playlist {
             let safe_title = html_escape(&info.title);
             let mut dur_str = String::new();
@@ -80,12 +80,18 @@ impl UiBuilder {
         }
 
         lines.push(String::new());
-        lines.push("Форматы для скачивания ↓".to_string());
+        let has_large_files = info.available_qualities.iter().any(|q| {
+            q.filesize_bytes.map(|b| b as f64 / (1024.0 * 1024.0) > max_size_mb).unwrap_or(false)
+        });
+
+        if has_large_files {
+            lines.push(format!("⚠️ Файлы <b>> {} МБ</b> не входят в ваш уровень подписки.", max_size_mb));
+        }
 
         lines.join("\n")
     }
 
-    pub fn build_quality_keyboard(info: &InfoResponse, short_id: &str) -> InlineKeyboardMarkup {
+    pub fn build_quality_keyboard(info: &InfoResponse, short_id: &str, max_size_mb: f64) -> InlineKeyboardMarkup {
         if info.is_playlist {
             let mut default_q = Quality::Video720p;
             if info.available_qualities.iter().any(|q| q.quality.is_audio()) && 
@@ -103,7 +109,8 @@ impl UiBuilder {
         let mut audio_btns = Vec::new();
 
         for opt in &info.available_qualities {
-            let text = match opt.quality {
+            let size_mb = opt.filesize_bytes.map(|b| b as f64 / (1024.0 * 1024.0)).unwrap_or(0.0);
+            let mut text = match opt.quality {
                 Quality::Video360p => "360p".to_string(),
                 Quality::Video480p => "480p".to_string(),
                 Quality::Video720p => "720p".to_string(),
@@ -115,6 +122,10 @@ impl UiBuilder {
                 Quality::Audio256 => "MP3 256k".to_string(),
                 Quality::AudioBest => "🎵 MP3".to_string(),
             };
+
+            if size_mb > max_size_mb {
+                text = format!("⚠️ {}", text);
+            }
 
             let btn = InlineKeyboardButton::callback(
                 text,

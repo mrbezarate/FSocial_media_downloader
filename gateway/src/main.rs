@@ -100,6 +100,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .enable_ctrlc_handler()
         .build();
 
+    let commands = vec![
+        teloxide::types::BotCommand::new("start", "🚀 Запустить бота / Помощь"),
+        teloxide::types::BotCommand::new("settings", "⚙️ Настройки качества и звука"),
+        teloxide::types::BotCommand::new("help", "❓ Как пользоваться ботом"),
+    ];
+    if let Err(e) = bot.set_my_commands(commands).await {
+        tracing::warn!("Failed to set bot commands: {}", e);
+    }
+
     info!("Gateway is running!");
     dispatcher.dispatch().await;
 

@@ -372,7 +372,8 @@ pub async fn run(ctx: Arc<WorkerContext>, mut shutdown_rx: tokio::sync::watch::R
                                     let path = std::path::PathBuf::from(&res.0);
                                     if let Ok(meta) = tokio::fs::metadata(&path).await {
                                         let size_mb = meta.len() as f64 / (1024.0 * 1024.0);
-                                        if size_mb > 50.0 && !ctx_clone.config.is_local_api() {
+                                        let max_size = if ctx_clone.config.is_local_api() { 1024.0 } else { 50.0 };
+                                        if size_mb > max_size {
                                             let _ = tokio::fs::remove_file(&path).await;
                                             if let Some(thumb) = &res.4 {
                                                 let _ = tokio::fs::remove_file(thumb).await;
