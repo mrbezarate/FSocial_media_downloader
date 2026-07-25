@@ -57,7 +57,7 @@ pub async fn handle(
                                 btns.push(row);
                             }
                         }
-                        btns.push(vec![InlineKeyboardButton::callback("⬅️ Назад", "settings_main")]);
+                        btns.push(vec![InlineKeyboardButton::callback("[ Назад ]", "settings_main")]);
                         let _ = bot.edit_message_reply_markup(msg.chat().id, msg.id()).reply_markup(InlineKeyboardMarkup::new(btns)).await;
                     }
                 } else if action == "set_vid" {
@@ -82,12 +82,12 @@ pub async fn handle(
                     
                     if let Some(msg) = q.message.as_ref() {
                         use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
-                        let vid_text = format!("📹 Качество Видео по умолчанию: {:?}", settings.default_video);
-                        let aud_text = format!("🎵 Качество Аудио по умолчанию: {:?}", settings.default_audio);
+                        let vid_text = format!("Формат видео: {:?}", settings.default_video);
+                        let aud_text = format!("Формат аудио: {:?}", settings.default_audio);
                         let mode_text = if settings.auto_download {
-                            "⚡ Режим: Автоматически (без вопросов)"
+                            "Режим: Автоматический"
                         } else {
-                            "💬 Режим: Всегда спрашивать качество"
+                            "Режим: Ручной выбор"
                         };
 
                         let keyboard = InlineKeyboardMarkup::new(vec![
@@ -112,21 +112,21 @@ pub async fn handle(
                     if action == "pause" {
                         task_states.insert(target.to_string(), "paused".to_string()).await;
                         let keyboard = teloxide::types::InlineKeyboardMarkup::new(vec![vec![
-                            teloxide::types::InlineKeyboardButton::callback("▶️ Продолжить", format!("resume|{}", target)),
-                            teloxide::types::InlineKeyboardButton::callback("🛑 Прервать", format!("abort|{}", target)),
+                            teloxide::types::InlineKeyboardButton::callback("[ Продолжить ]", format!("resume|{}", target)),
+                            teloxide::types::InlineKeyboardButton::callback("[ Отмена ]", format!("abort|{}", target)),
                         ]]);
                         let _ = bot.edit_message_reply_markup(msg.chat().id, msg.id()).reply_markup(keyboard).await;
                         let _ = nats.publish_command(&fsocial_common::TaskCommand { task_id: target.to_string(), action: fsocial_common::TaskCommandAction::Pause }).await;
                     } else if action == "resume" {
                         task_states.insert(target.to_string(), "running".to_string()).await;
                         let keyboard = teloxide::types::InlineKeyboardMarkup::new(vec![vec![
-                            teloxide::types::InlineKeyboardButton::callback("⏸ Отменить (Пауза)", format!("pause|{}", target))
+                            teloxide::types::InlineKeyboardButton::callback("[ Пауза ]", format!("pause|{}", target))
                         ]]);
                         let _ = bot.edit_message_reply_markup(msg.chat().id, msg.id()).reply_markup(keyboard).await;
                         let _ = nats.publish_command(&fsocial_common::TaskCommand { task_id: target.to_string(), action: fsocial_common::TaskCommandAction::Resume }).await;
                     } else if action == "abort" {
                         task_states.insert(target.to_string(), "aborted".to_string()).await;
-                        let _ = bot.edit_message_text(msg.chat().id, msg.id(), "🛑 Скачивание прервано пользователем.").reply_markup(teloxide::types::InlineKeyboardMarkup::default()).await;
+                        let _ = bot.edit_message_text(msg.chat().id, msg.id(), "Скачивание прервано пользователем.").reply_markup(teloxide::types::InlineKeyboardMarkup::default()).await;
                         let _ = nats.publish_command(&fsocial_common::TaskCommand { task_id: target.to_string(), action: fsocial_common::TaskCommandAction::Abort }).await;
                     }
                 }

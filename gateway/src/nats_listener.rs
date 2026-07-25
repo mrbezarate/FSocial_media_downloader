@@ -110,11 +110,11 @@ async fn handle_result(bot: &crate::MyBot, res: TaskResult, config: &AppConfig, 
                     } else {
                         let path_ext = path.extension().unwrap_or_default().to_string_lossy().to_lowercase();
                         if path_ext == "gif" {
-                            teloxide::types::InputMedia::Animation(teloxide::types::InputMediaAnimation::new(input_file).caption(format!("{}{}", title, bot_watermark)))
+                            teloxide::types::InputMedia::Animation(teloxide::types::InputMediaAnimation::new(input_file).caption(bot_watermark.to_string()))
                         } else if path_ext == "jpg" || path_ext == "jpeg" || path_ext == "png" || path_ext == "webp" {
-                            teloxide::types::InputMedia::Photo(teloxide::types::InputMediaPhoto::new(input_file).caption(format!("{}{}", title, bot_watermark)))
+                            teloxide::types::InputMedia::Photo(teloxide::types::InputMediaPhoto::new(input_file).caption(bot_watermark.to_string()))
                         } else {
-                            let mut vid = teloxide::types::InputMediaVideo::new(input_file).caption(format!("{}{}", title, bot_watermark));
+                            let mut vid = teloxide::types::InputMediaVideo::new(input_file).caption(bot_watermark.to_string());
                             if let Some(thumb) = &thumb_path {
                                 let thumb_file = if config.is_local_api() {
                                     let abs_thumb = std::fs::canonicalize(thumb).unwrap_or_else(|_| PathBuf::from(thumb));
@@ -167,19 +167,19 @@ async fn handle_result(bot: &crate::MyBot, res: TaskResult, config: &AppConfig, 
                 } else {
                     let path_ext = path.extension().unwrap_or_default().to_string_lossy().to_lowercase();
                     if path_ext == "jpg" || path_ext == "jpeg" || path_ext == "png" || path_ext == "webp" {
-                        let mut req = bot.send_photo(chat_id, input_file).caption(format!("{}{}", title, bot_watermark));
+                        let mut req = bot.send_photo(chat_id, input_file).caption(bot_watermark.to_string());
                         if let Some(reply_id) = res.reply_to_message_id {
                             req = req.reply_parameters(teloxide::types::ReplyParameters::new(teloxide::types::MessageId(reply_id)));
                         }
                         req.await
                     } else if path_ext == "gif" {
-                        let mut req = bot.send_animation(chat_id, input_file).caption(format!("{}{}", title, bot_watermark));
+                        let mut req = bot.send_animation(chat_id, input_file).caption(bot_watermark.to_string());
                         if let Some(reply_id) = res.reply_to_message_id {
                             req = req.reply_parameters(teloxide::types::ReplyParameters::new(teloxide::types::MessageId(reply_id)));
                         }
                         req.await
                     } else {
-                        let mut req = bot.send_video(chat_id, input_file).caption(format!("{}{}", title, bot_watermark));
+                        let mut req = bot.send_video(chat_id, input_file).caption(bot_watermark.to_string());
                         if let Some(thumb) = &thumb_path {
                             let thumb_file = if config.is_local_api() {
                                 let abs_thumb = std::fs::canonicalize(thumb).unwrap_or_else(|_| PathBuf::from(thumb));
@@ -270,7 +270,7 @@ async fn handle_result(bot: &crate::MyBot, res: TaskResult, config: &AppConfig, 
 
                     let bot_watermark = "\n\nСкачано с помощью бота @FSocial_Media_Downloader_bot";
                     if *is_audio {
-                        let mut audio = InputMediaAudio::new(input_file).title(title.clone()).caption(format!("{}{}", title, bot_watermark));
+                        let mut audio = InputMediaAudio::new(input_file).title(title.clone()).caption(bot_watermark.trim_start().to_string());
                         if let Some(perf) = performer {
                             audio = audio.performer(perf.clone());
                         }
@@ -285,7 +285,7 @@ async fn handle_result(bot: &crate::MyBot, res: TaskResult, config: &AppConfig, 
                         }
                         media_group.push(InputMedia::Audio(audio));
                     } else {
-                        let mut video = InputMediaVideo::new(input_file).caption(format!("{}{}", title, bot_watermark));
+                        let mut video = InputMediaVideo::new(input_file).caption(bot_watermark.to_string());
                         if let Some(thumb) = thumb_path {
                             let thumb_file = if config.is_local_api() {
                                 let abs_thumb = std::fs::canonicalize(thumb).unwrap_or_else(|_| PathBuf::from(thumb));

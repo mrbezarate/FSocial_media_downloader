@@ -20,24 +20,24 @@ pub enum Command {
 pub async fn handle(bot: crate::MyBot, msg: Message, cmd: Command, redis_pool: deadpool_redis::Pool) -> ResponseResult<()> {
     match cmd {
         Command::Start => {
-            let text = "👋 Привет! Я бот для загрузки медиа.\n\n\
+            let text = "<b>FSocial Media Downloader</b>\n—\n\
                         Поддерживаемые платформы:\n\
-                        - YouTube\n\
-                        - TikTok\n\
-                        - Instagram\n\
-                        - Spotify\n\
-                        - SoundCloud\n\
-                        - Pinterest\n\n\
-                        Просто отправь мне ссылку, и я скачаю её для тебя!";
-            bot.send_message(msg.chat.id, text).await?;
+                        • YouTube\n\
+                        • TikTok\n\
+                        • Instagram\n\
+                        • Spotify\n\
+                        • SoundCloud\n\
+                        • Pinterest\n\n\
+                        Отправьте ссылку для начала загрузки.";
+            bot.send_message(msg.chat.id, text).parse_mode(teloxide::types::ParseMode::Html).await?;
         }
         Command::Help => {
-            let text = "📖 Как использовать:\n\n\
-                        1. Отправь ссылку на видео/аудио в личные сообщения.\n\
-                        2. Выбери качество из появившегося меню.\n\
-                        3. Дождись окончания загрузки.\n\n\
-                        В группах я скачиваю медиа автоматически в качестве по умолчанию (настраивается в /settings).";
-            bot.send_message(msg.chat.id, text).await?;
+            let text = "<b>Как использовать:</b>\n\n\
+                        1. Отправьте ссылку на видео/аудио в личные сообщения.\n\
+                        2. Выберите качество из появившегося меню.\n\
+                        3. Дождитесь окончания загрузки.\n\n\
+                        В группах загрузка происходит автоматически, согласно настройкам по умолчанию (см. /settings).";
+            bot.send_message(msg.chat.id, text).parse_mode(teloxide::types::ParseMode::Html).await?;
         }
         Command::Quality => {
             let text = "Команда /quality устарела. Пожалуйста, используйте /settings.";
@@ -57,16 +57,16 @@ pub async fn handle(bot: crate::MyBot, msg: Message, cmd: Command, redis_pool: d
                 }
             }
 
-            let text = "🔧 <b>Настройки профиля</b>\n\nЗдесь вы можете выбрать качество по умолчанию для загрузок в группах (или быстрых загрузок).";
+            let text = "<b>Настройки профиля</b>\n\nЗдесь вы можете выбрать формат по умолчанию для автоматических загрузок.";
             
             use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
             
-            let vid_text = format!("📹 Качество Видео по умолчанию: {:?}", settings.default_video);
-            let aud_text = format!("🎵 Качество Аудио по умолчанию: {:?}", settings.default_audio);
+            let vid_text = format!("Формат видео: {:?}", settings.default_video);
+            let aud_text = format!("Формат аудио: {:?}", settings.default_audio);
             let mode_text = if settings.auto_download {
-                "⚡ Режим: Автоматически (без вопросов)"
+                "Режим: Автоматический"
             } else {
-                "💬 Режим: Всегда спрашивать качество"
+                "Режим: Ручной выбор"
             };
 
             let keyboard = InlineKeyboardMarkup::new(vec![
@@ -81,8 +81,8 @@ pub async fn handle(bot: crate::MyBot, msg: Message, cmd: Command, redis_pool: d
                 .await?;
         }
         Command::Premium => {
-            let title = "Premium Подписка 💎";
-            let description = "Месяц безграничных загрузок: неограниченный трафик, плейлисты любой длины и максимальный приоритет в очереди!";
+            let title = "Premium Подписка";
+            let description = "Месяц безграничных загрузок: неограниченный трафик, большие плейлисты и максимальный приоритет в очереди.";
             let payload = "premium_1_month";
             let provider_token = ""; // Оставляем пустым для Telegram Stars
             let currency = "XTR"; // Telegram Stars

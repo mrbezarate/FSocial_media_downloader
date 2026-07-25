@@ -17,10 +17,10 @@ impl UiBuilder {
                 } else {
                     format!("{:02}:{:02}", minutes, seconds)
                 };
-                dur_str = format!("\n\n⏱ <b>Длительность: {}</b>", d_str);
+                dur_str = format!("\n<i>Длительность: {}</i>", d_str);
             }
             return format!(
-                "📁 <b>{}</b> →\n\n<i>Всего элементов: {}</i>{}\n\nФорматы для скачивания ↓",
+                "<b>{}</b>\n—\n<i>Элементов: {}</i>{}\n\nФорматы для загрузки ↓",
                 safe_title,
                 info.playlist_count.unwrap_or(0),
                 dur_str
@@ -28,12 +28,10 @@ impl UiBuilder {
         }
 
         let mut lines = Vec::new();
-        lines.push(format!("📹 <b>{}</b> →", html_escape(&info.title)));
+        lines.push(format!("<b>{}</b>", html_escape(&info.title)));
 
         if let Some(ref author) = info.uploader {
-            if !author.is_empty() {
-                lines.push(format!("👤 <b>{}</b> →", html_escape(author)));
-            }
+                lines.push(format!("<i>Автор: {}</i>", html_escape(author)));
         }
 
         if let Some(dur) = info.duration_secs {
@@ -45,18 +43,13 @@ impl UiBuilder {
             } else {
                 format!("{:02}:{:02}", minutes, seconds)
             };
-            lines.push(format!("⏱ <b>Длительность: {}</b> →", d_str));
+            lines.push(format!("<i>Длительность: {}</i>", d_str));
         }
 
         lines.push(String::new());
 
         for opt in &info.available_qualities {
             let size_mb = opt.filesize_bytes.map(|b| b / (1024 * 1024)).unwrap_or(0);
-            let speed_icon = match size_mb {
-                0..=35 => "⚡️",
-                36..=120 => "🚀",
-                _ => "⚖️",
-            };
             let q_name = match opt.quality {
                 Quality::Video360p => "360p",
                 Quality::Video480p => "480p",
@@ -76,7 +69,7 @@ impl UiBuilder {
                 "  ~MB".to_string()
             };
 
-            lines.push(format!("{} {:>5}: {}", speed_icon, q_name, size_str));
+            lines.push(format!("{:>5} | {}", q_name, size_str));
         }
 
         lines.push(String::new());
@@ -85,7 +78,7 @@ impl UiBuilder {
         });
 
         if has_large_files {
-            lines.push(format!("⚠️ Файлы <b>> {} МБ</b> не входят в ваш уровень подписки.", max_size_mb));
+            lines.push(format!("* Файлы > {} МБ не входят в ваш уровень подписки.", max_size_mb));
         }
 
         lines.join("\n")
@@ -99,7 +92,7 @@ impl UiBuilder {
                 default_q = Quality::AudioBest;
             }
             let btn = InlineKeyboardButton::callback(
-                format!("📥 Скачать плейлист ({})", info.playlist_count.unwrap_or(0)),
+                format!("[ Скачать плейлист ({}) ]", info.playlist_count.unwrap_or(0)),
                 format!("{}|{}", default_q.callback_id(), short_id),
             );
             return InlineKeyboardMarkup::new(vec![vec![btn]]);
@@ -117,14 +110,14 @@ impl UiBuilder {
                 Quality::Video1080p => "1080p".to_string(),
                 Quality::Video1440p => "1440p".to_string(),
                 Quality::Video4K => "4K".to_string(),
-                Quality::Best => "⭐ Best".to_string(),
+                Quality::Best => "Лучшее".to_string(),
                 Quality::Audio128 => "MP3 128k".to_string(),
                 Quality::Audio256 => "MP3 256k".to_string(),
-                Quality::AudioBest => "🎵 MP3".to_string(),
+                Quality::AudioBest => "MP3".to_string(),
             };
 
             if size_mb > max_size_mb {
-                text = format!("⚠️ {}", text);
+                text = format!("{} (Premium)", text);
             }
 
             let btn = InlineKeyboardButton::callback(

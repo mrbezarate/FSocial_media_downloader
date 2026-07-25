@@ -4,16 +4,16 @@ use teloxide::prelude::*;
 use crate::{nats_client::NatsClient, url_parser, UrlCache};
 
 const SUPPORTED_SOURCES_INFO: &str = "\
-❌ <b>Ошибка: Ссылка недействительна или источник не поддерживается!</b>\n\n\
-Пожалуйста, отправляйте только рабочие ссылки со следующих поддерживаемых сервисов:\n\n\
-🎬 <b>Видео сервисы:</b>\n\
-• <b>YouTube</b> (Видео, Shorts)\n\
-• <b>Instagram</b> (Reels, Посты)\n\
-• <b>TikTok</b>\n\
-• <b>Pinterest</b>\n\n\
-🎵 <b>Аудио сервисы:</b>\n\
-• <b>Spotify</b> (Треки, Альбомы, Плейлисты)\n\
-• <b>SoundCloud</b>";
+Ошибка: Ссылка недействительна или источник не поддерживается.\n\n\
+Пожалуйста, отправляйте только рабочие ссылки со следующих платформ:\n\n\
+<b>Видео:</b>\n\
+• YouTube\n\
+• Instagram\n\
+• TikTok\n\
+• Pinterest\n\n\
+<b>Аудио:</b>\n\
+• Spotify\n\
+• SoundCloud";
 
 pub async fn handle(
     bot: crate::MyBot,
@@ -71,7 +71,7 @@ pub async fn handle(
             let bytes: u64 = redis::cmd("GET").arg(&bytes_key).query_async(&mut conn).await.unwrap_or(0);
             
             if dls >= 200 || bytes >= 2147483648 {
-                let _ = bot.send_message(msg.chat.id, "Сегодня лимит бесплатных загрузок исчерпан. Он обновится через 24 часа или можно оформить Premium 💎.")
+                let _ = bot.send_message(msg.chat.id, "Сегодня лимит бесплатных загрузок исчерпан. Он обновится через 24 часа или можно оформить Premium.")
                     .reply_parameters(teloxide::types::ReplyParameters::new(msg.id))
                     .await;
                 return Ok(());
@@ -103,7 +103,7 @@ pub async fn handle(
         task.reply_to_message_id = Some(message_id);
 
         let status_msg = bot
-            .send_message(msg.chat.id, "⏳ Загружаю...")
+            .send_message(msg.chat.id, "Загрузка...")
             .reply_parameters(teloxide::types::ReplyParameters::new(msg.id))
             .await?;
 
@@ -142,7 +142,7 @@ pub async fn handle(
 
         if let Err(e) = nats.publish_task(&task).await {
             tracing::error!("Failed to publish task: {}", e);
-            bot.edit_message_text(msg.chat.id, status_msg.id, "❌ Внутренняя ошибка")
+            bot.edit_message_text(msg.chat.id, status_msg.id, "Ошибка")
                 .await?;
         }
     } else {
@@ -153,7 +153,7 @@ pub async fn handle(
         match nats.request_info(&req).await {
             Ok(info) => {
                 if info.is_playlist && info.playlist_count.unwrap_or(0) > 50 && !is_premium {
-                    let _ = bot.send_message(msg.chat.id, "❌ Бесплатные пользователи могут скачивать плейлисты только до 50 треков. Оформите Premium 💎 для снятия ограничений.")
+                    let _ = bot.send_message(msg.chat.id, "Бесплатные пользователи могут скачивать плейлисты только до 50 треков. Оформите Premium для снятия ограничений.")
                         .reply_parameters(teloxide::types::ReplyParameters::new(msg.id))
                         .await;
                     return Ok(());
