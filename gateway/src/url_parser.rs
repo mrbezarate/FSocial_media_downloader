@@ -40,3 +40,58 @@ pub fn contains_url(msg: Message) -> bool {
     }
     false
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_youtube_urls() {
+        let urls = vec![
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "https://youtu.be/dQw4w9WgXcQ",
+            "https://www.youtube.com/shorts/abcdefg",
+            "https://youtube.com/playlist?list=PLxyz123"
+        ];
+        for url in urls {
+            let m = detect(url).expect(&format!("Should detect {}", url));
+            assert_eq!(m.platform, Platform::YouTube);
+        }
+    }
+
+    #[test]
+    fn test_tiktok_urls() {
+        let urls = vec![
+            "https://www.tiktok.com/@user/video/1234567890",
+            "https://vm.tiktok.com/ZMxxxxxx/",
+            "https://vt.tiktok.com/ZSxxxxxx/"
+        ];
+        for url in urls {
+            let m = detect(url).expect(&format!("Should detect {}", url));
+            assert_eq!(m.platform, Platform::TikTok);
+        }
+    }
+
+    #[test]
+    fn test_instagram_urls() {
+        let urls = vec![
+            "https://www.instagram.com/reel/Cxxxxxx/",
+            "https://instagram.com/p/Cxxxxxx/"
+        ];
+        for url in urls {
+            let m = detect(url).expect(&format!("Should detect {}", url));
+            assert_eq!(m.platform, Platform::Instagram);
+        }
+    }
+
+    #[test]
+    fn test_spotify_urls() {
+        let track = detect("https://open.spotify.com/track/123").unwrap();
+        assert_eq!(track.platform, Platform::Spotify);
+        assert_eq!(track.media_type, MediaType::Audio);
+
+        let playlist = detect("https://open.spotify.com/playlist/123").unwrap();
+        assert_eq!(playlist.platform, Platform::Spotify);
+        assert_eq!(playlist.media_type, MediaType::Playlist);
+    }
+}

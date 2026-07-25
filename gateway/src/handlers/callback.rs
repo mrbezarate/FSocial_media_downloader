@@ -11,6 +11,7 @@ pub async fn handle(
     _config: AppConfig,
     url_cache: UrlCache,
     task_states: crate::TaskStates,
+    redis_pool: deadpool_redis::Pool,
 ) -> ResponseResult<()> {
     if let Some(data) = &q.data {
         let parts: Vec<&str> = data.splitn(2, '|').collect();
@@ -21,7 +22,7 @@ pub async fn handle(
             if action == "pause" || action == "resume" || action == "abort" {
                 if let Some(msg) = q.message {
                     if action == "pause" {
-                        task_states.lock().await.insert(target.to_string(), "paused".to_string());
+                        task_states.insert(target.to_string(), "paused".to_string()).await;
                         let keyboard = teloxide::types::InlineKeyboardMarkup::new(vec![vec![
                             teloxide::types::InlineKeyboardButton::callback("▶️ Продолжить", format!("resume|{}", target)),
                             teloxide::types::InlineKeyboardButton::callback("🛑 Прервать", format!("abort|{}", target)),
@@ -29,14 +30,14 @@ pub async fn handle(
                         let _ = bot.edit_message_reply_markup(msg.chat().id, msg.id()).reply_markup(keyboard).await;
                         let _ = nats.publish_command(&fsocial_common::TaskCommand { task_id: target.to_string(), action: fsocial_common::TaskCommandAction::Pause }).await;
                     } else if action == "resume" {
-                        task_states.lock().await.insert(target.to_string(), "running".to_string());
+                        task_states.insert(target.to_string(), "running".to_string()).await;
                         let keyboard = teloxide::types::InlineKeyboardMarkup::new(vec![vec![
                             teloxide::types::InlineKeyboardButton::callback("⏸ Отменить (Пауза)", format!("pause|{}", target))
                         ]]);
                         let _ = bot.edit_message_reply_markup(msg.chat().id, msg.id()).reply_markup(keyboard).await;
                         let _ = nats.publish_command(&fsocial_common::TaskCommand { task_id: target.to_string(), action: fsocial_common::TaskCommandAction::Resume }).await;
                     } else if action == "abort" {
-                        task_states.lock().await.insert(target.to_string(), "aborted".to_string());
+                        task_states.insert(target.to_string(), "aborted".to_string()).await;
                         let _ = bot.edit_message_text(msg.chat().id, msg.id(), "🛑 Скачивание прервано пользователем.").reply_markup(teloxide::types::InlineKeyboardMarkup::default()).await;
                         let _ = nats.publish_command(&fsocial_common::TaskCommand { task_id: target.to_string(), action: fsocial_common::TaskCommandAction::Abort }).await;
                     }
@@ -121,6 +122,38 @@ pub async fn handle(
                         );
                         task.status_message_id = Some(msg.id().0);
                         task.status_is_media = msg.regular_message().map(|m| m.photo().is_some() || m.video().is_some() || m.animation().is_some() || m.document().is_some() || m.audio().is_some()).unwrap_or(false);
+
+                        let cache_key = format!("file_id:{}:{}", task.quality.callback_id(), task.url);
+                        let mut cached_file_id = None;
+                        if let Ok(mut conn) = redis_pool.get().await {
+                            let res: redis::RedisResult<String> = redis::cmd("GET").arg(&cache_key).query_async(&mut conn).await;
+                            if let Ok(fid) = res {
+                                cached_file_id = Some(fid);
+                            }
+                        }
+
+                        if let Some(file_id) = cached_file_id {
+                            let input_file = teloxide::types::InputFile::file_id(teloxide::types::FileId(file_id));
+                            let bot_watermark = "\n\nСкачано с помощью бота @FSocial_Media_Downloader_bot";
+                            
+                            // If original message had a media (like thumbnail), edit it. Else edit text or delete and send new.
+                            // To keep it simple, we just delete the info message and send the cached file.
+                            let _ = bot.delete_message(chat, msg.id()).await;
+                            
+                            let send_res = if task.quality.is_audio() {
+                                bot.send_audio(chat, input_file)
+                                    .caption(bot_watermark)
+                                    .await
+                            } else {
+                                bot.send_video(chat, input_file)
+                                    .caption(bot_watermark)
+                                    .await
+                            };
+                            
+                            if send_res.is_ok() {
+                                return Ok(());
+                            }
+                        }
 
                         if let Err(e) = nats.publish_task(&task).await {
                             error!("Failed to publish task: {}", e);

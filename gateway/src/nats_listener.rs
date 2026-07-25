@@ -6,7 +6,13 @@ use tracing::{error, info};
 
 use crate::nats_client::NatsClient;
 
-pub async fn listen(bot: crate::MyBot, nats: NatsClient, config: AppConfig, task_states: crate::TaskStates) {
+pub async fn listen(
+    bot: crate::MyBot,
+    nats: NatsClient,
+    config: AppConfig,
+    task_states: crate::TaskStates,
+    redis_pool: deadpool_redis::Pool,
+) {
     let mut results_sub = nats.subscribe_results().await.expect("Results sub failed");
     let mut progress_sub = nats.subscribe_progress().await.expect("Progress sub failed");
 
@@ -14,7 +20,12 @@ pub async fn listen(bot: crate::MyBot, nats: NatsClient, config: AppConfig, task
         tokio::select! {
             Some(msg) = results_sub.next() => {
                 if let Ok(res) = serde_json::from_slice::<TaskResult>(&msg.payload) {
-                    handle_result(&bot, res, &config).await;
+                    let bot_clone = bot.clone();
+                    let config_clone = config.clone();
+                    let redis_pool_clone = redis_pool.clone();
+                    tokio::spawn(async move {
+                        handle_result(&bot_clone, res, &config_clone, &redis_pool_clone).await;
+                    });
                 }
             }
             Some(msg) = progress_sub.next() => {
@@ -26,7 +37,7 @@ pub async fn listen(bot: crate::MyBot, nats: NatsClient, config: AppConfig, task
     }
 }
 
-async fn handle_result(bot: &crate::MyBot, res: TaskResult, config: &AppConfig) {
+async fn handle_result(bot: &crate::MyBot, res: TaskResult, config: &AppConfig, redis_pool: &deadpool_redis::Pool) {
     let chat_id = teloxide::types::ChatId(res.chat_id);
 
     match res.status {
@@ -36,6 +47,7 @@ async fn handle_result(bot: &crate::MyBot, res: TaskResult, config: &AppConfig) 
             is_audio,
             performer,
             thumb_path,
+            cache_key,
             ..
         } => {
             let path = PathBuf::from(&file_path);
@@ -63,28 +75,33 @@ async fn handle_result(bot: &crate::MyBot, res: TaskResult, config: &AppConfig) 
                     return;
                 }
             }
-            let file_data_opt = tokio::fs::read(&path).await.ok();
             let file_name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
 
             let mut edit_success = false;
+            let mut edit_res_msg = None;
 
             if res.status_is_media {
                 if let Some(msg_id) = res.status_message_id {
                     let mid = teloxide::types::MessageId(msg_id);
-                    let input_file = match &file_data_opt {
-                        Some(d) => InputFile::memory(d.clone()).file_name(file_name.clone()),
-                        None => InputFile::file(path.clone())
+                    let input_file = if config.is_local_api() {
+                        let abs_path = std::fs::canonicalize(&path).unwrap_or(path.clone());
+                        InputFile::file_id(format!("file://{}", abs_path.to_string_lossy()).into())
+                    } else {
+                        InputFile::file(path.clone())
                     };
 
+                    let bot_watermark = "\n\nСкачано с помощью бота @FSocial_Media_Downloader_bot";
                     let media = if is_audio {
-                        let mut aud = teloxide::types::InputMediaAudio::new(input_file).title(title.clone());
+                        let mut aud = teloxide::types::InputMediaAudio::new(input_file).title(title.clone()).caption(format!("{}{}", title, bot_watermark));
                         if let Some(perf) = &performer {
                             aud.performer = Some(perf.clone());
                         }
                         if let Some(thumb) = &thumb_path {
-                            let thumb_file = match tokio::fs::read(thumb).await {
-                                Ok(data) => InputFile::memory(data).file_name("cover.jpg"),
-                                Err(_) => InputFile::file(thumb.clone())
+                            let thumb_file = if config.is_local_api() {
+                                let abs_thumb = std::fs::canonicalize(thumb).unwrap_or_else(|_| PathBuf::from(thumb));
+                                InputFile::file_id(format!("file://{}", abs_thumb.to_string_lossy()).into())
+                            } else {
+                                InputFile::file(thumb.clone())
                             };
                             aud.thumbnail = Some(thumb_file);
                         }
@@ -92,15 +109,17 @@ async fn handle_result(bot: &crate::MyBot, res: TaskResult, config: &AppConfig) 
                     } else {
                         let path_ext = path.extension().unwrap_or_default().to_string_lossy().to_lowercase();
                         if path_ext == "gif" {
-                            teloxide::types::InputMedia::Animation(teloxide::types::InputMediaAnimation::new(input_file).caption(title.clone()))
+                            teloxide::types::InputMedia::Animation(teloxide::types::InputMediaAnimation::new(input_file).caption(format!("{}{}", title, bot_watermark)))
                         } else if path_ext == "jpg" || path_ext == "jpeg" || path_ext == "png" || path_ext == "webp" {
-                            teloxide::types::InputMedia::Photo(teloxide::types::InputMediaPhoto::new(input_file).caption(title.clone()))
+                            teloxide::types::InputMedia::Photo(teloxide::types::InputMediaPhoto::new(input_file).caption(format!("{}{}", title, bot_watermark)))
                         } else {
-                            let mut vid = teloxide::types::InputMediaVideo::new(input_file).caption(title.clone());
+                            let mut vid = teloxide::types::InputMediaVideo::new(input_file).caption(format!("{}{}", title, bot_watermark));
                             if let Some(thumb) = &thumb_path {
-                                let thumb_file = match tokio::fs::read(thumb).await {
-                                    Ok(data) => InputFile::memory(data).file_name("cover.jpg"),
-                                    Err(_) => InputFile::file(thumb.clone())
+                                let thumb_file = if config.is_local_api() {
+                                    let abs_thumb = std::fs::canonicalize(thumb).unwrap_or_else(|_| PathBuf::from(thumb));
+                                    InputFile::file_id(format!("file://{}", abs_thumb.to_string_lossy()).into())
+                                } else {
+                                    InputFile::file(thumb.clone())
                                 };
                                 vid.thumbnail = Some(thumb_file);
                             }
@@ -108,29 +127,35 @@ async fn handle_result(bot: &crate::MyBot, res: TaskResult, config: &AppConfig) 
                         }
                     };
 
-                    if let Ok(_) = bot.edit_message_media(chat_id, mid, media).await {
+                    if let Ok(m) = bot.edit_message_media(chat_id, mid, media).await {
                         edit_success = true;
+                        edit_res_msg = Some(m);
                     }
                 }
             }
 
             let send_result = if edit_success {
-                Ok(())
+                Ok(edit_res_msg.unwrap())
             } else {
-                let input_file = match file_data_opt {
-                    Some(data) => InputFile::memory(data).file_name(file_name),
-                    None => InputFile::file(path.clone())
+                let input_file = if config.is_local_api() {
+                    let abs_path = std::fs::canonicalize(&path).unwrap_or(path.clone());
+                    InputFile::file_id(format!("file://{}", abs_path.to_string_lossy()).into())
+                } else {
+                    InputFile::file(path.clone())
                 };
 
+                let bot_watermark = "\n\nСкачано с помощью бота @FSocial_Media_Downloader_bot";
                 let api_res = if is_audio {
-                    let mut req = bot.send_audio(chat_id, input_file).title(title);
+                    let mut req = bot.send_audio(chat_id, input_file).title(title.clone()).caption(format!("{}{}", title, bot_watermark));
                     if let Some(perf) = &performer {
                         req = req.performer(perf.clone());
                     }
                     if let Some(thumb) = &thumb_path {
-                        let thumb_file = match tokio::fs::read(thumb).await {
-                            Ok(data) => InputFile::memory(data).file_name("cover.jpg"),
-                            Err(_) => InputFile::file(thumb.clone())
+                        let thumb_file = if config.is_local_api() {
+                            let abs_thumb = std::fs::canonicalize(thumb).unwrap_or_else(|_| PathBuf::from(thumb));
+                            InputFile::file_id(format!("file://{}", abs_thumb.to_string_lossy()).into())
+                        } else {
+                            InputFile::file(thumb.clone())
                         };
                         req = req.thumbnail(thumb_file);
                     }
@@ -141,23 +166,25 @@ async fn handle_result(bot: &crate::MyBot, res: TaskResult, config: &AppConfig) 
                 } else {
                     let path_ext = path.extension().unwrap_or_default().to_string_lossy().to_lowercase();
                     if path_ext == "jpg" || path_ext == "jpeg" || path_ext == "png" || path_ext == "webp" {
-                        let mut req = bot.send_photo(chat_id, input_file).caption(title);
+                        let mut req = bot.send_photo(chat_id, input_file).caption(format!("{}{}", title, bot_watermark));
                         if let Some(reply_id) = res.reply_to_message_id {
                             req = req.reply_parameters(teloxide::types::ReplyParameters::new(teloxide::types::MessageId(reply_id)));
                         }
                         req.await
                     } else if path_ext == "gif" {
-                        let mut req = bot.send_animation(chat_id, input_file).caption(title);
+                        let mut req = bot.send_animation(chat_id, input_file).caption(format!("{}{}", title, bot_watermark));
                         if let Some(reply_id) = res.reply_to_message_id {
                             req = req.reply_parameters(teloxide::types::ReplyParameters::new(teloxide::types::MessageId(reply_id)));
                         }
                         req.await
                     } else {
-                        let mut req = bot.send_video(chat_id, input_file).caption(title);
+                        let mut req = bot.send_video(chat_id, input_file).caption(format!("{}{}", title, bot_watermark));
                         if let Some(thumb) = &thumb_path {
-                            let thumb_file = match tokio::fs::read(thumb).await {
-                                Ok(data) => InputFile::memory(data).file_name("cover.jpg"),
-                                Err(_) => InputFile::file(thumb.clone())
+                            let thumb_file = if config.is_local_api() {
+                                let abs_thumb = std::fs::canonicalize(thumb).unwrap_or_else(|_| PathBuf::from(thumb));
+                                InputFile::file_id(format!("file://{}", abs_thumb.to_string_lossy()).into())
+                            } else {
+                                InputFile::file(thumb.clone())
                             };
                             req = req.thumbnail(thumb_file);
                         }
@@ -167,7 +194,7 @@ async fn handle_result(bot: &crate::MyBot, res: TaskResult, config: &AppConfig) 
                         req.await
                     }
                 };
-                api_res.map(|_| ())
+                api_res
             };
 
             match send_result {
@@ -185,6 +212,33 @@ async fn handle_result(bot: &crate::MyBot, res: TaskResult, config: &AppConfig) 
                     if let Some(thumb) = &thumb_path {
                         let _ = tokio::fs::remove_file(thumb).await;
                     }
+                    
+                    // Cache the file_id in Redis
+                    if let Some(key) = cache_key {
+                        let extracted_file_id = if let Some(m) = send_result.as_ref().unwrap().video() {
+                            Some(m.file.id.clone())
+                        } else if let Some(m) = send_result.as_ref().unwrap().audio() {
+                            Some(m.file.id.clone())
+                        } else if let Some(m) = send_result.as_ref().unwrap().photo().and_then(|p| p.last()) {
+                            Some(m.file.id.clone())
+                        } else if let Some(m) = send_result.as_ref().unwrap().animation() {
+                            Some(m.file.id.clone())
+                        } else {
+                            None
+                        };
+                        
+                        if let Some(file_id) = extracted_file_id {
+                            if let Ok(mut conn) = redis_pool.get().await {
+                                let _: () = redis::cmd("SETEX")
+                                    .arg(&key)
+                                    .arg(30 * 24 * 3600) // 30 days
+                                    .arg(&file_id.0)
+                                    .query_async(&mut conn)
+                                    .await
+                                    .unwrap_or(());
+                            }
+                        }
+                    }
                 }
                 Err(e) => {
                     error!("Failed to send file: {}", e);
@@ -198,41 +252,45 @@ async fn handle_result(bot: &crate::MyBot, res: TaskResult, config: &AppConfig) 
                 }
             }
         }
-        TaskStatus::PlaylistCompleted { files, playlist_title: _, failed_count } => {
+        TaskStatus::PlaylistCompleted { files, playlist_title: _, failed_count, failed_items } => {
             use teloxide::types::{InputMedia, InputMediaAudio, InputMediaVideo};
             
             // Chunk files into groups of 10
             for chunk in files.chunks(10) {
                 let mut media_group = Vec::new();
-                for (file_path, title, _duration_secs, performer, thumb_path, is_audio) in chunk {
+                for (file_path, title, _duration_secs, performer, thumb_path, is_audio, _cache_key) in chunk {
                     let path = PathBuf::from(file_path);
-                    let input_file = match tokio::fs::read(&path).await {
-                        Ok(data) => {
-                            let file_name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
-                            InputFile::memory(data).file_name(file_name)
-                        },
-                        Err(_) => InputFile::file(path.clone())
+                    let input_file = if config.is_local_api() {
+                        let abs_path = std::fs::canonicalize(&path).unwrap_or(path.clone());
+                        InputFile::file_id(format!("file://{}", abs_path.to_string_lossy()).into())
+                    } else {
+                        InputFile::file(path.clone())
                     };
 
+                    let bot_watermark = "\n\nСкачано с помощью бота @FSocial_Media_Downloader_bot";
                     if *is_audio {
-                        let mut audio = InputMediaAudio::new(input_file).title(title.clone());
+                        let mut audio = InputMediaAudio::new(input_file).title(title.clone()).caption(format!("{}{}", title, bot_watermark));
                         if let Some(perf) = performer {
                             audio = audio.performer(perf.clone());
                         }
                         if let Some(thumb) = thumb_path {
-                            let thumb_file = match tokio::fs::read(thumb).await {
-                                Ok(data) => InputFile::memory(data).file_name("cover.jpg"),
-                                Err(_) => InputFile::file(thumb.clone())
+                            let thumb_file = if config.is_local_api() {
+                                let abs_thumb = std::fs::canonicalize(thumb).unwrap_or_else(|_| PathBuf::from(thumb));
+                                InputFile::file_id(format!("file://{}", abs_thumb.to_string_lossy()).into())
+                            } else {
+                                InputFile::file(thumb.clone())
                             };
                             audio = audio.thumbnail(thumb_file);
                         }
                         media_group.push(InputMedia::Audio(audio));
                     } else {
-                        let mut video = InputMediaVideo::new(input_file).caption(title.clone());
+                        let mut video = InputMediaVideo::new(input_file).caption(format!("{}{}", title, bot_watermark));
                         if let Some(thumb) = thumb_path {
-                            let thumb_file = match tokio::fs::read(thumb).await {
-                                Ok(data) => InputFile::memory(data).file_name("cover.jpg"),
-                                Err(_) => InputFile::file(thumb.clone())
+                            let thumb_file = if config.is_local_api() {
+                                let abs_thumb = std::fs::canonicalize(thumb).unwrap_or_else(|_| PathBuf::from(thumb));
+                                InputFile::file_id(format!("file://{}", abs_thumb.to_string_lossy()).into())
+                            } else {
+                                InputFile::file(thumb.clone())
                             };
                             video.thumbnail = Some(thumb_file);
                         }
@@ -245,14 +303,52 @@ async fn handle_result(bot: &crate::MyBot, res: TaskResult, config: &AppConfig) 
                     if let Some(reply_id) = res.reply_to_message_id {
                         req = req.reply_parameters(teloxide::types::ReplyParameters::new(teloxide::types::MessageId(reply_id)));
                     }
-                    if let Err(e) = req.await {
-                        error!("Failed to send media group: {}", e);
+                    match req.await {
+                        Ok(messages) => {
+                            for (msg, file_tuple) in messages.iter().zip(chunk.iter()) {
+                                let cache_key = &file_tuple.6;
+                                if let Some(key) = cache_key {
+                                    let extracted_file_id = if let Some(m) = msg.video() {
+                                        Some(m.file.id.clone())
+                                    } else if let Some(m) = msg.audio() {
+                                        Some(m.file.id.clone())
+                                    } else {
+                                        None
+                                    };
+                                    
+                                    if let Some(file_id) = extracted_file_id {
+                                        if let Ok(mut conn) = redis_pool.get().await {
+                                            let _: () = redis::cmd("SETEX")
+                                                .arg(key)
+                                                .arg(30 * 24 * 3600)
+                                                .arg(&file_id.0)
+                                                .query_async(&mut conn)
+                                                .await
+                                                .unwrap_or(());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to send media group: {}", e);
+                        }
+                    }
+                    
+                    // cleanup
+                    for (file_path, _, _, _, thumb_path, _, _) in chunk {
+                        let _ = tokio::fs::remove_file(file_path).await;
+                        if let Some(t) = thumb_path {
+                            let _ = tokio::fs::remove_file(t).await;
+                        }
                     }
                 }
+                
+                tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
             }
 
             if failed_count > 0 {
-                let msg = format!("⚠️ Не удалось скачать {} треков из-за ограничений Spotify/SoundCloud.", failed_count);
+                let msg = format!("⚠️ Не удалось скачать {} треков из-за ограничений:\n{}", failed_count, failed_items.join("\n"));
                 let _ = bot.send_message(chat_id, msg).await;
             }
 
@@ -261,7 +357,7 @@ async fn handle_result(bot: &crate::MyBot, res: TaskResult, config: &AppConfig) 
                 let _ = bot.delete_message(chat_id, mid).await;
             }
 
-            for (file_path, _, _, _, thumb_path, _) in files {
+            for (file_path, _, _, _, thumb_path, _, _) in files {
                 let _ = tokio::fs::remove_file(&file_path).await;
                 if let Some(thumb) = thumb_path {
                     let _ = tokio::fs::remove_file(thumb).await;
@@ -282,10 +378,7 @@ async fn handle_result(bot: &crate::MyBot, res: TaskResult, config: &AppConfig) 
 }
 
 async fn handle_progress(bot: &crate::MyBot, res: TaskResult, task_states: &crate::TaskStates) {
-    let is_paused = {
-        let ts = task_states.lock().await;
-        ts.get(&res.task_id).map(|s| s.as_str()) == Some("paused")
-    };
+    let is_paused = task_states.get(&res.task_id).await == Some("paused".to_string());
     if is_paused { return; }
 
     match res.status {

@@ -84,7 +84,15 @@ pub async fn download(
         }
     }
 
-    let status = child.wait().await?;
+    let timeout_duration = std::time::Duration::from_secs(3600); // 1 hour max
+    let status = match tokio::time::timeout(timeout_duration, child.wait()).await {
+        Ok(Ok(s)) => s,
+        Ok(Err(e)) => return Err(AppError::Download(format!("Ошибка процесса yt-dlp: {}", e))),
+        Err(_) => {
+            let _ = child.kill().await;
+            return Err(AppError::Download("Процесс скачивания завис и был прерван (таймаут 1 час)".into()));
+        }
+    };
     if !status.success() {
         let stderr = error_log.lock().await.clone();
         error!("yt-dlp error: {}", stderr);

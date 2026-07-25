@@ -677,9 +677,12 @@ version = "0.1.0"
 dependencies = [
  "async-nats",
  "chrono",
+ "deadpool-redis",
  "dotenvy",
  "fsocial-common",
  "futures",
+ "moka",
+ "redis",
  "regex",
  "reqwest",
  "serde",

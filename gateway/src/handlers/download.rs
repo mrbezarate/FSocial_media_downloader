@@ -21,6 +21,7 @@ pub async fn handle(
     nats: NatsClient,
     config: AppConfig,
     url_cache: UrlCache,
+    redis_pool: deadpool_redis::Pool,
 ) -> ResponseResult<()> {
     let text = if let Some(t) = msg.text().or(msg.caption()) {
         t
@@ -31,12 +32,14 @@ pub async fn handle(
     let url_match = if let Some(m) = url_parser::detect(text) {
         m
     } else {
-        // Deletes the user's message containing unsupported/invalid link
-        let _ = bot.delete_message(msg.chat.id, msg.id).await;
-        let _ = bot
-            .send_message(msg.chat.id, SUPPORTED_SOURCES_INFO)
-            .parse_mode(teloxide::types::ParseMode::Html)
-            .await;
+        if msg.chat.is_private() {
+            // Deletes the user's message containing unsupported/invalid link
+            let _ = bot.delete_message(msg.chat.id, msg.id).await;
+            let _ = bot
+                .send_message(msg.chat.id, SUPPORTED_SOURCES_INFO)
+                .parse_mode(teloxide::types::ParseMode::Html)
+                .await;
+        }
         return Ok(());
     };
 
@@ -74,6 +77,37 @@ pub async fn handle(
             .await?;
 
         task.status_message_id = Some(status_msg.id.0);
+
+        let cache_key = format!("file_id:{}:{}", task.quality.callback_id(), task.url);
+        let mut cached_file_id = None;
+        if let Ok(mut conn) = redis_pool.get().await {
+            let res: redis::RedisResult<String> = redis::cmd("GET").arg(&cache_key).query_async(&mut conn).await;
+            if let Ok(fid) = res {
+                cached_file_id = Some(fid);
+            }
+        }
+
+        if let Some(file_id) = cached_file_id {
+            let input_file = teloxide::types::InputFile::file_id(teloxide::types::FileId(file_id));
+            let bot_watermark = "\n\nСкачано с помощью бота @FSocial_Media_Downloader_bot";
+            let send_res = if task.media_type == fsocial_common::MediaType::Audio {
+                bot.send_audio(msg.chat.id, input_file)
+                    .caption(bot_watermark)
+                    .reply_parameters(teloxide::types::ReplyParameters::new(msg.id))
+                    .await
+            } else {
+                bot.send_video(msg.chat.id, input_file)
+                    .caption(bot_watermark)
+                    .reply_parameters(teloxide::types::ReplyParameters::new(msg.id))
+                    .await
+            };
+            
+            if send_res.is_ok() {
+                let _ = bot.delete_message(msg.chat.id, status_msg.id).await;
+                return Ok(());
+            }
+            // If it failed (e.g. file_id invalid), we fallback to download
+        }
 
         if let Err(e) = nats.publish_task(&task).await {
             tracing::error!("Failed to publish task: {}", e);

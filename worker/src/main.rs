@@ -7,6 +7,7 @@ use deadpool_redis::{Config as RedisConfig, Runtime};
 mod audio;
 mod media;
 mod nats_consumer;
+mod info_handler;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -35,16 +36,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         redis_pool,
         cache,
         proxy_pool,
-        task_states: std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        task_states: moka::future::Cache::builder().time_to_live(std::time::Duration::from_secs(4 * 3600)).build(),
     });
 
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+    
     let ctx_clone = worker_ctx.clone();
-    tokio::spawn(async move {
-        nats_consumer::run(ctx_clone).await;
+    let worker_handle = tokio::spawn(async move {
+        nats_consumer::run(ctx_clone, shutdown_rx).await;
     });
 
     tokio::signal::ctrl_c().await?;
-    info!("Shutting down fsocial-worker gracefully.");
+    info!("Shutting down fsocial-worker gracefully. Waiting for ongoing downloads (timeout 120s)...");
+    let _ = shutdown_tx.send(true);
+
+    match tokio::time::timeout(tokio::time::Duration::from_secs(120), worker_handle).await {
+        Ok(_) => info!("Graceful shutdown complete."),
+        Err(_) => tracing::error!("Shutdown timed out. Forcing exit."),
+    }
 
     Ok(())
 }

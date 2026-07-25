@@ -8,15 +8,22 @@ pub async fn find_track_url(config: &AppConfig, meta: &SpotifyTrackMeta, proxy: 
     let query = meta.youtube_search_query();
     info!("Searching platforms for: {}", query);
 
-    // Try YouTube first
-    if let Ok(url) = search_platform(config, &query, "ytsearch1", proxy).await {
+    // Try YouTube Music first (already baked into query in models.rs)
+    if let Ok(url) = search_platform(config, &query, "", proxy).await {
+        return Ok(url);
+    }
+    
+    // Try standard YouTube as fallback
+    let fallback_query = query.replace("ytmsearch1:", "ytsearch1:");
+    if let Ok(url) = search_platform(config, &fallback_query, "", proxy).await {
         return Ok(url);
     }
     
     tracing::warn!("YouTube search failed for {}. Falling back to SoundCloud...", query);
 
     // Fallback to SoundCloud
-    if let Ok(url) = search_platform(config, &query, "scsearch1", proxy).await {
+    let sc_query = fallback_query.replace("ytsearch1:", "scsearch1:");
+    if let Ok(url) = search_platform(config, &sc_query, "", proxy).await {
         return Ok(url);
     }
 
@@ -26,8 +33,11 @@ pub async fn find_track_url(config: &AppConfig, meta: &SpotifyTrackMeta, proxy: 
 async fn search_platform(config: &AppConfig, query: &str, search_prefix: &str, proxy: Option<&str>) -> Result<String, AppError> {
     let mut cmd = Command::new(&config.ytdlp_path);
     cmd.arg("--dump-json")
-       .arg("--no-download")
-       .arg("--default-search").arg(search_prefix);
+       .arg("--no-download");
+       
+    if !search_prefix.is_empty() {
+        cmd.arg("--default-search").arg(search_prefix);
+    }
        
     if let Some(p) = proxy {
         cmd.arg("--proxy").arg(p);

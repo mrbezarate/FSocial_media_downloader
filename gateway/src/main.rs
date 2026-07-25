@@ -16,7 +16,7 @@ mod ui;
 mod url_parser;
 
 pub type UrlCache = Arc<Mutex<HashMap<String, String>>>;
-pub type TaskStates = Arc<Mutex<HashMap<String, String>>>;
+pub type TaskStates = moka::future::Cache<String, String>;
 
 pub type MyBot = teloxide::adaptors::CacheMe<teloxide::adaptors::Throttle<teloxide::Bot>>;
 
@@ -66,11 +66,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_clone = config.clone();
     
     let url_cache: UrlCache = Arc::new(Mutex::new(HashMap::new()));
-    let task_states: TaskStates = Arc::new(Mutex::new(HashMap::new()));
+    let task_states: TaskStates = moka::future::Cache::builder()
+        .time_to_live(std::time::Duration::from_secs(4 * 3600))
+        .build();
 
     let ts_clone = task_states.clone();
+    
+    let redis_cfg = deadpool_redis::Config::from_url(&config.redis_url);
+    let redis_pool = redis_cfg.create_pool(Some(deadpool_redis::Runtime::Tokio1)).expect("Failed to create Redis pool");
+    let redis_pool_clone = redis_pool.clone();
+
     tokio::spawn(async move {
-        nats_listener::listen(bot_clone, nats_clone, config_clone, ts_clone).await;
+        nats_listener::listen(bot_clone, nats_clone, config_clone, ts_clone, redis_pool_clone).await;
     });
 
     info!("NATS listener started. Setting up Telegram handlers...");
@@ -88,7 +95,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let callback_handler = Update::filter_callback_query().endpoint(handlers::callback::handle);
 
     let mut dispatcher = Dispatcher::builder(bot.clone(), dptree::entry().branch(handler).branch(callback_handler))
-        .dependencies(dptree::deps![nats_client.clone(), config.clone(), url_cache.clone(), task_states.clone()])
+        .dependencies(dptree::deps![nats_client.clone(), config.clone(), url_cache.clone(), task_states.clone(), redis_pool.clone()])
         .enable_ctrlc_handler()
         .build();
 

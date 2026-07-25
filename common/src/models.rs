@@ -224,11 +224,13 @@ pub enum TaskStatus {
         performer: Option<String>,
         thumb_path: Option<String>,
         is_audio: bool,
+        cache_key: Option<String>,
     },
     PlaylistCompleted {
-        files: Vec<(String, String, Option<u64>, Option<String>, Option<String>, bool)>, // path, title, duration, performer, thumb_path, is_audio
+        files: Vec<(String, String, Option<u64>, Option<String>, Option<String>, bool, Option<String>)>, // path, title, duration, performer, thumb_path, is_audio, cache_key
         playlist_title: String,
         failed_count: u32,
+        failed_items: Vec<String>,
     },
     Failed {
         error: String,
@@ -265,7 +267,7 @@ impl SpotifyTrackMeta {
     /// Build a YouTube Music search query from Spotify metadata
     pub fn youtube_search_query(&self) -> String {
         let artist = self.artists.first().cloned().unwrap_or_default();
-        format!("ytsearch1:{} - {} audio", artist, self.title)
+        format!("ytmsearch1:\"{}\" \"{}\" audio", artist, self.title)
     }
 
     /// Primary artist name

@@ -19,3 +19,6 @@ chrono = { workspace = true }
 reqwest = { workspace = true }
 url = { workspace = true }
 futures = { workspace = true }
+moka = { workspace = true, features = ["future"] }
+redis.workspace = true
+deadpool-redis.workspace = true
