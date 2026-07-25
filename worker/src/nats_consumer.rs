@@ -80,42 +80,52 @@ pub async fn publish_playlist_progress(
 }
 
 pub async fn run(ctx: Arc<WorkerContext>, mut shutdown_rx: tokio::sync::watch::Receiver<bool>) {
-    let consumer = match ctx.nats_jetstream
+    let stream = match ctx.nats_jetstream
         .get_or_create_stream(async_nats::jetstream::stream::Config {
             name: subjects::STREAM_NAME.to_string(),
-            subjects: vec![subjects::DOWNLOAD_TASKS.to_string()],
+            subjects: vec![subjects::DOWNLOAD_TASKS_WILDCARD.to_string()],
             retention: async_nats::jetstream::stream::RetentionPolicy::WorkQueue,
             max_age: std::time::Duration::from_secs(7200),
             ..Default::default()
         })
         .await
     {
-        Ok(s) => match s
-            .get_or_create_consumer(
-                subjects::WORKER_GROUP,
-                Config {
-                    durable_name: Some(subjects::WORKER_GROUP.to_string()),
-                    filter_subject: subjects::DOWNLOAD_TASKS.to_string(),
-                    ack_wait: std::time::Duration::from_secs(3600),
-                    ..Default::default()
-                },
-            )
-            .await
-        {
-            Ok(c) => c,
-            Err(e) => {
-                error!("Failed to create JetStream consumer: {:?}", e);
-                return;
-            }
-        },
+        Ok(s) => s,
         Err(e) => {
             error!("Failed to create JetStream stream: {:?}", e);
             return;
         }
     };
 
+    let premium_consumer = stream
+        .get_or_create_consumer(
+            "worker-group-premium",
+            Config {
+                durable_name: Some("worker-group-premium".to_string()),
+                filter_subject: subjects::DOWNLOAD_TASKS_PREMIUM.to_string(),
+                ack_wait: std::time::Duration::from_secs(3600),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("Failed to create premium consumer");
+
+    let free_consumer = stream
+        .get_or_create_consumer(
+            "worker-group-free",
+            Config {
+                durable_name: Some("worker-group-free".to_string()),
+                filter_subject: subjects::DOWNLOAD_TASKS_FREE.to_string(),
+                ack_wait: std::time::Duration::from_secs(3600),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("Failed to create free consumer");
+
     let semaphore = Arc::new(Semaphore::new(ctx.config.max_concurrent_downloads));
-    let mut messages = consumer.messages().await.expect("Failed to get messages");
+    let mut premium_messages = premium_consumer.messages().await.expect("Failed to get messages");
+    let mut free_messages = free_consumer.messages().await.expect("Failed to get messages");
 
     crate::info_handler::start_info_listener(ctx.clone()).await;
 
@@ -154,6 +164,7 @@ pub async fn run(ctx: Arc<WorkerContext>, mut shutdown_rx: tokio::sync::watch::R
         };
 
         let msg_res_opt = tokio::select! {
+            biased;
             _ = shutdown_rx.changed() => {
                 if *shutdown_rx.borrow() {
                     info!("Shutdown signal received while waiting for message.");
@@ -161,7 +172,8 @@ pub async fn run(ctx: Arc<WorkerContext>, mut shutdown_rx: tokio::sync::watch::R
                 }
                 continue;
             }
-            opt = messages.next() => opt,
+            opt = premium_messages.next() => opt,
+            opt = free_messages.next() => opt,
         };
 
         let msg_res = match msg_res_opt {
@@ -410,6 +422,23 @@ pub async fn run(ctx: Arc<WorkerContext>, mut shutdown_rx: tokio::sync::watch::R
             while let Some((_idx, url, res)) = stream.next().await {
                 match res {
                     Ok((file_path, title, duration_secs, performer, thumb_path, final_quality)) => {
+                        if !task.is_premium && task.user_id > 0 {
+                            if let Ok(meta) = tokio::fs::metadata(&file_path).await {
+                                let size = meta.len();
+                                if let Ok(mut conn) = ctx_clone.redis_pool.get().await {
+                                    let bytes_key = format!("today_bytes:{}", task.user_id);
+                                    let dl_key = format!("today_downloads:{}", task.user_id);
+                                    
+                                    let _ : redis::RedisResult<()> = redis::pipe()
+                                        .cmd("INCRBY").arg(&bytes_key).arg(size)
+                                        .cmd("EXPIRE").arg(&bytes_key).arg(86400)
+                                        .cmd("INCR").arg(&dl_key)
+                                        .cmd("EXPIRE").arg(&dl_key).arg(86400)
+                                        .query_async(&mut conn).await;
+                                }
+                            }
+                        }
+                        
                         let cache_key = Some(format!("file_id:{}:{}", final_quality.callback_id(), url));
                         completed_files.push((file_path, title, duration_secs, performer, thumb_path, final_quality.is_audio(), cache_key));
                     }

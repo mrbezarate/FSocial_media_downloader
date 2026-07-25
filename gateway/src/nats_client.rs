@@ -21,7 +21,7 @@ impl NatsClient {
         self.jetstream
             .get_or_create_stream(Config {
                 name: subjects::STREAM_NAME.to_string(),
-                subjects: vec![subjects::DOWNLOAD_TASKS.to_string()],
+                subjects: vec![subjects::DOWNLOAD_TASKS_WILDCARD.to_string()],
                 retention: async_nats::jetstream::stream::RetentionPolicy::WorkQueue,
                 max_age: std::time::Duration::from_secs(7200),
                 ..Default::default()
@@ -33,8 +33,13 @@ impl NatsClient {
 
     pub async fn publish_task(&self, task: &DownloadTask) -> Result<(), AppError> {
         let payload = serde_json::to_vec(task).map_err(|e| AppError::Nats(e.to_string()))?;
+        let subject = if task.is_premium {
+            subjects::DOWNLOAD_TASKS_PREMIUM.to_string()
+        } else {
+            subjects::DOWNLOAD_TASKS_FREE.to_string()
+        };
         self.jetstream
-            .publish(subjects::DOWNLOAD_TASKS.to_string(), payload.into())
+            .publish(subject, payload.into())
             .await
             .map_err(|e| AppError::Nats(e.to_string()))?;
         Ok(())

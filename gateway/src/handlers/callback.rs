@@ -159,10 +159,45 @@ pub async fn handle(
                         let message_id = msg.id().0;
                         let chat = msg.chat().id;
 
+                        let mut settings = fsocial_common::UserSettings::default();
+                        if let Ok(mut conn) = redis_pool.get().await {
+                            let key = format!("user_settings:{}", user_id);
+                            let res: redis::RedisResult<String> = redis::cmd("GET").arg(&key).query_async(&mut conn).await;
+                            if let Ok(val) = res {
+                                if let Ok(parsed) = serde_json::from_str::<fsocial_common::UserSettings>(&val) {
+                                    settings = parsed;
+                                }
+                            }
+                        }
+
+                        let now = chrono::Utc::now().timestamp();
+                        let is_premium = settings.premium_until.map(|until| until > now).unwrap_or(false);
+
+                        // Check limits if not premium
+                        if !is_premium {
+                            if let Ok(mut conn) = redis_pool.get().await {
+                                let dl_key = format!("today_downloads:{}", user_id);
+                                let bytes_key = format!("today_bytes:{}", user_id);
+                                
+                                let dls: u64 = redis::cmd("GET").arg(&dl_key).query_async(&mut conn).await.unwrap_or(0);
+                                let bytes: u64 = redis::cmd("GET").arg(&bytes_key).query_async(&mut conn).await.unwrap_or(0);
+                                
+                                if dls >= 200 || bytes >= 2147483648 {
+                                    let err_msg = "Сегодня лимит бесплатных загрузок исчерпан. Он обновится через 24 часа или можно оформить Premium 💎.";
+                                    let _ = bot.send_message(chat, err_msg).await;
+                                    return Ok(());
+                                }
+                            }
+                        }
+
                         // Check if it's a playlist
                         let req = fsocial_common::InfoRequest { url: url_match.url.clone() };
                         if let Ok(info) = nats.request_info(&req).await {
                             if info.is_playlist && !info.playlist_urls.is_empty() {
+                                if info.playlist_urls.len() > 50 && !is_premium {
+                                    let _ = bot.send_message(chat, "❌ Бесплатные пользователи могут скачивать плейлисты только до 50 треков. Оформите Premium 💎 для снятия ограничений.").await;
+                                    return Ok(());
+                                }
                                 let playlist_status = format!("⏳ Скачивание плейлиста: 0/{}\nПрогресс: 0%", info.playlist_urls.len());
                                 if let Err(_) = bot
                                     .edit_message_text(chat, msg.id(), playlist_status.clone())
@@ -185,6 +220,7 @@ pub async fn handle(
                                     message_id,
                                     user_id,
                                     false,
+                                    is_premium,
                                 );
                                 task.status_message_id = Some(msg.id().0);
                                 task.status_is_media = msg.regular_message().map(|m| m.photo().is_some() || m.video().is_some() || m.animation().is_some() || m.document().is_some() || m.audio().is_some()).unwrap_or(false);
@@ -203,6 +239,7 @@ pub async fn handle(
                             message_id,
                             user_id,
                             false,
+                            is_premium,
                         );
                         task.status_message_id = Some(msg.id().0);
                         task.status_is_media = msg.regular_message().map(|m| m.photo().is_some() || m.video().is_some() || m.animation().is_some() || m.document().is_some() || m.audio().is_some()).unwrap_or(false);

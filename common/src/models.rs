@@ -6,6 +6,7 @@ pub struct UserSettings {
     pub default_video: Quality,
     pub default_audio: Quality,
     pub quiet_mode: bool,
+    pub premium_until: Option<i64>,
 }
 
 impl Default for UserSettings {
@@ -14,6 +15,7 @@ impl Default for UserSettings {
             default_video: Quality::Best,
             default_audio: Quality::AudioBest,
             quiet_mode: false,
+            premium_until: None,
         }
     }
 }
@@ -197,6 +199,7 @@ pub struct DownloadTask {
     pub reply_to_message_id: Option<i32>,
     pub user_id: u64,
     pub is_group: bool,
+    pub is_premium: bool,
     pub spotify_meta: Option<SpotifyTrackMeta>,
     pub playlist_urls: Option<Vec<String>>,
     pub created_at: DateTime<Utc>,
@@ -212,6 +215,7 @@ impl DownloadTask {
         message_id: i32,
         user_id: u64,
         is_group: bool,
+        is_premium: bool,
     ) -> Self {
         Self {
             task_id: uuid::Uuid::new_v4().to_string(),
@@ -226,6 +230,7 @@ impl DownloadTask {
             reply_to_message_id: None,
             user_id,
             is_group,
+            is_premium,
             spotify_meta: None,
             playlist_urls: None,
             created_at: Utc::now(),
@@ -339,8 +344,12 @@ pub struct InfoResponse {
 // ─── NATS Subjects ───────────────────────────────────────────────────────────
 
 pub mod subjects {
-    /// Subject to publish new download tasks (Gateway → Workers, via JetStream)
-    pub const DOWNLOAD_TASKS: &str = "tasks.download";
+    /// Subject to publish Premium download tasks
+    pub const DOWNLOAD_TASKS_PREMIUM: &str = "tasks.download.premium";
+    /// Subject to publish Free download tasks
+    pub const DOWNLOAD_TASKS_FREE: &str = "tasks.download.free";
+    /// Subject prefix for streams
+    pub const DOWNLOAD_TASKS_WILDCARD: &str = "tasks.download.*";
     /// Subject for completed/failed results (Workers → Gateway, plain NATS pub/sub)
     pub const TASK_RESULTS: &str = "tasks.result";
     /// Subject for progress updates (Workers → Gateway, plain NATS pub/sub)

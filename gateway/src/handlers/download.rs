@@ -59,6 +59,26 @@ pub async fn handle(
         }
     }
 
+    let now = chrono::Utc::now().timestamp();
+    let is_premium = settings.premium_until.map(|until| until > now).unwrap_or(false);
+
+    if !is_premium && user_id > 0 {
+        if let Ok(mut conn) = redis_pool.get().await {
+            let dl_key = format!("today_downloads:{}", user_id);
+            let bytes_key = format!("today_bytes:{}", user_id);
+            
+            let dls: u64 = redis::cmd("GET").arg(&dl_key).query_async(&mut conn).await.unwrap_or(0);
+            let bytes: u64 = redis::cmd("GET").arg(&bytes_key).query_async(&mut conn).await.unwrap_or(0);
+            
+            if dls >= 200 || bytes >= 2147483648 {
+                let _ = bot.send_message(msg.chat.id, "Сегодня лимит бесплатных загрузок исчерпан. Он обновится через 24 часа или можно оформить Premium 💎.")
+                    .reply_parameters(teloxide::types::ReplyParameters::new(msg.id))
+                    .await;
+                return Ok(());
+            }
+        }
+    }
+
     let bypass_info = is_group || url_match.platform == fsocial_common::Platform::Pinterest || settings.quiet_mode;
 
     if bypass_info {
@@ -79,6 +99,7 @@ pub async fn handle(
             message_id,
             user_id,
             is_group,
+            is_premium,
         );
         task.reply_to_message_id = Some(message_id);
 
@@ -132,6 +153,13 @@ pub async fn handle(
 
         match nats.request_info(&req).await {
             Ok(info) => {
+                if info.is_playlist && info.playlist_count.unwrap_or(0) > 50 && !is_premium {
+                    let _ = bot.send_message(msg.chat.id, "❌ Бесплатные пользователи могут скачивать плейлисты только до 50 треков. Оформите Premium 💎 для снятия ограничений.")
+                        .reply_parameters(teloxide::types::ReplyParameters::new(msg.id))
+                        .await;
+                    return Ok(());
+                }
+
                 let max_size = if config.is_local_api() { 1024.0 } else { 50.0 };
                 let text = crate::ui::UiBuilder::build_info_message(&info, max_size);
                 let keyboard = crate::ui::UiBuilder::build_quality_keyboard(&info, &short_id, max_size);
