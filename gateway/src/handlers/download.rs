@@ -102,9 +102,14 @@ pub async fn handle(
         );
         task.reply_to_message_id = Some(message_id);
 
+        let keyboard = teloxide::types::InlineKeyboardMarkup::new(vec![vec![
+            teloxide::types::InlineKeyboardButton::callback("🛑 Отмена", format!("abort|{}", task.task_id))
+        ]]);
+
         let status_msg = bot
             .send_message(msg.chat.id, "⏳ Загружаю...")
             .reply_parameters(teloxide::types::ReplyParameters::new(msg.id))
+            .reply_markup(keyboard)
             .await?;
 
         task.status_message_id = Some(status_msg.id.0);

@@ -391,9 +391,12 @@ async fn handle_progress(bot: &crate::MyBot, res: TaskResult, task_states: &crat
         TaskStatus::Progress { percent: _, status_text } => {
             if let Some(msg_id) = res.status_message_id {
                 let text = format!("⏳ {}", status_text);
+                let keyboard = teloxide::types::InlineKeyboardMarkup::new(vec![vec![
+                    teloxide::types::InlineKeyboardButton::callback("🛑 Отмена", format!("abort|{}", res.task_id))
+                ]]);
 
-                if let Err(_) = bot.edit_message_text(teloxide::types::ChatId(res.chat_id), teloxide::types::MessageId(msg_id), text.clone()).await {
-                    let _ = bot.edit_message_caption(teloxide::types::ChatId(res.chat_id), teloxide::types::MessageId(msg_id)).caption(text).await;
+                if let Err(_) = bot.edit_message_text(teloxide::types::ChatId(res.chat_id), teloxide::types::MessageId(msg_id), text.clone()).reply_markup(keyboard.clone()).await {
+                    let _ = bot.edit_message_caption(teloxide::types::ChatId(res.chat_id), teloxide::types::MessageId(msg_id)).caption(text).reply_markup(keyboard).await;
                 }
             }
         },

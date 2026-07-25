@@ -164,17 +164,7 @@ pub async fn handle(
                     bot.answer_callback_query(q.id.clone()).await?;
 
                     if let Some(msg) = q.message {
-                        if let Err(_) = bot
-                            .edit_message_text(msg.chat().id, msg.id(), "⏳ Загружаю...")
-                            .reply_markup(teloxide::types::InlineKeyboardMarkup::default())
-                            .await
-                        {
-                            let _ = bot
-                                .edit_message_caption(msg.chat().id, msg.id())
-                                .caption("⏳ Загружаю...")
-                                .reply_markup(teloxide::types::InlineKeyboardMarkup::default())
-                                .await;
-                        }
+                        // we moved edit_message_text down after task generation
 
                         let user_id = q.from.id.0;
                         let chat_id = msg.chat().id.0;
@@ -220,19 +210,6 @@ pub async fn handle(
                                     let _ = bot.send_message(chat, "❌ Бесплатные пользователи могут скачивать плейлисты только до 50 треков. Оформите Premium 💎 для снятия ограничений.").await;
                                     return Ok(());
                                 }
-                                let playlist_status = format!("⏳ Скачивание плейлиста: 0/{}\nПрогресс: 0%", info.playlist_urls.len());
-                                if let Err(_) = bot
-                                    .edit_message_text(chat, msg.id(), playlist_status.clone())
-                                    .reply_markup(teloxide::types::InlineKeyboardMarkup::default())
-                                    .await
-                                {
-                                    let _ = bot
-                                        .edit_message_caption(chat, msg.id())
-                                        .caption(playlist_status)
-                                        .reply_markup(teloxide::types::InlineKeyboardMarkup::default())
-                                        .await;
-                                }
-
                                 let mut task = DownloadTask::new(
                                     url_match.url.clone(),
                                     url_match.platform.clone(),
@@ -247,16 +224,33 @@ pub async fn handle(
                                 task.status_message_id = Some(msg.id().0);
                                 task.status_is_media = msg.regular_message().map(|m| m.photo().is_some() || m.video().is_some() || m.animation().is_some() || m.document().is_some() || m.audio().is_some()).unwrap_or(false);
                                 task.playlist_urls = Some(info.playlist_urls.clone());
+
+                                let playlist_status = format!("⏳ Скачивание плейлиста: 0/{}\nПрогресс: 0%", info.playlist_urls.len());
+                                let keyboard = teloxide::types::InlineKeyboardMarkup::new(vec![vec![
+                                    teloxide::types::InlineKeyboardButton::callback("🛑 Отмена", format!("abort|{}", task.task_id))
+                                ]]);
+
+                                if let Err(_) = bot
+                                    .edit_message_text(chat, msg.id(), playlist_status.clone())
+                                    .reply_markup(keyboard.clone())
+                                    .await
+                                {
+                                    let _ = bot
+                                        .edit_message_caption(chat, msg.id())
+                                        .caption(playlist_status)
+                                        .reply_markup(keyboard)
+                                        .await;
+                                }
                                 let _ = nats.publish_task(&task).await;
                                 return Ok(());
                             }
                         }
 
                         let mut task = DownloadTask::new(
-                            url_match.url,
-                            url_match.platform,
-                            url_match.media_type,
-                            quality,
+                            url_match.url.clone(),
+                            url_match.platform.clone(),
+                            url_match.media_type.clone(),
+                            quality.clone(),
                             chat_id,
                             message_id,
                             user_id,
@@ -265,6 +259,22 @@ pub async fn handle(
                         );
                         task.status_message_id = Some(msg.id().0);
                         task.status_is_media = msg.regular_message().map(|m| m.photo().is_some() || m.video().is_some() || m.animation().is_some() || m.document().is_some() || m.audio().is_some()).unwrap_or(false);
+
+                        let keyboard = teloxide::types::InlineKeyboardMarkup::new(vec![vec![
+                            teloxide::types::InlineKeyboardButton::callback("🛑 Отмена", format!("abort|{}", task.task_id))
+                        ]]);
+
+                        if let Err(_) = bot
+                            .edit_message_text(msg.chat().id, msg.id(), "⏳ Загружаю...")
+                            .reply_markup(keyboard.clone())
+                            .await
+                        {
+                            let _ = bot
+                                .edit_message_caption(msg.chat().id, msg.id())
+                                .caption("⏳ Загружаю...")
+                                .reply_markup(keyboard)
+                                .await;
+                        }
 
                         let cache_key = format!("file_id:{}:{}", task.quality.callback_id(), task.url);
                         let mut cached_file_id = None;
