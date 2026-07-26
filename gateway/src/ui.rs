@@ -75,7 +75,13 @@ impl UiBuilder {
                 "  ~MB".to_string()
             };
 
-            lines.push(format!("{} {:>5} | {}", speed_icon, q_name, size_str));
+            let time_str = match size_mb {
+                0..=35 => "~1-3 сек",
+                36..=120 => "~3-10 сек",
+                _ => "~15+ сек",
+            };
+
+            lines.push(format!("{} {:>5} | {} | ⏳ {}", speed_icon, q_name, size_str, time_str));
         }
 
         lines.push(String::new());

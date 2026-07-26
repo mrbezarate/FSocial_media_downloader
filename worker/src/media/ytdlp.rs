@@ -480,7 +480,7 @@ pub async fn get_info(
         available_qualities.dedup();
     }
 
-    let quality_options: Vec<fsocial_common::QualityOption> = available_qualities
+    let mut sizes: Vec<(Quality, Option<u64>)> = available_qualities
         .into_iter()
         .map(|q| {
             let mut sz_bytes: Option<u64> = None;
@@ -534,7 +534,27 @@ pub async fn get_info(
                     sz_bytes = Some((d as f64 * rate_mb_per_sec * 1024.0 * 1024.0) as u64);
                 }
             }
+            (q, sz_bytes)
+        })
+        .collect();
 
+    // Enforce monotonic sizes for video
+    let mut last_size = 0;
+    for (q, sz_bytes) in &mut sizes {
+        if !q.is_audio() {
+            if let Some(size) = sz_bytes {
+                if *size <= last_size && last_size > 0 {
+                    // Make it 20% larger than the previous lower quality
+                    *size = (last_size as f64 * 1.2) as u64;
+                }
+                last_size = *size;
+            }
+        }
+    }
+
+    let quality_options: Vec<fsocial_common::QualityOption> = sizes
+        .into_iter()
+        .map(|(q, sz_bytes)| {
             let mb = sz_bytes.map(|b| b / (1024 * 1024)).unwrap_or(0);
             let estimated_secs = sz_bytes.map(|b| (b / (10 * 1024 * 1024)).max(1)); // 10 MB/s speed
 
