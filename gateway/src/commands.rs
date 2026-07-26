@@ -111,17 +111,15 @@ pub async fn handle(
                 .await?;
         }
         Command::Premium => {
-            let title = "Premium Подписка 💎";
-            let description = "Месяц безграничных загрузок: неограниченный трафик, плейлисты любой длины и максимальный приоритет в очереди!";
-            let payload = "premium_1_month";
-            let _provider_token = ""; // Оставляем пустым для Telegram Stars
-            let currency = "XTR"; // Telegram Stars
-            let prices = vec![teloxide::types::LabeledPrice {
-                label: "1 Месяц Premium".into(),
-                amount: 500, // 500 звезд
-            }];
-
-            bot.send_invoice(msg.chat.id, title, description, payload, currency, prices)
+            let text = "💎 <b>Premium Подписка</b>\n\nВыберите период подписки:\n\n• <b>1 День</b> - 20 ⭐ (попробовать!)\n• <b>1 Месяц</b> - 500 ⭐\n• <b>1 Год</b> - 4800 ⭐ (Выгода 20%!)";
+            let keyboard = teloxide::types::InlineKeyboardMarkup::new(vec![
+                vec![teloxide::types::InlineKeyboardButton::callback("1 День (20 ⭐)", "invoice|day")],
+                vec![teloxide::types::InlineKeyboardButton::callback("1 Месяц (500 ⭐)", "invoice|month")],
+                vec![teloxide::types::InlineKeyboardButton::callback("1 Год (4800 ⭐)", "invoice|year")],
+            ]);
+            bot.send_message(msg.chat.id, text)
+                .reply_markup(keyboard)
+                .parse_mode(teloxide::types::ParseMode::Html)
                 .await?;
         }
         Command::Log => {
