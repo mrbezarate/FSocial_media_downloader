@@ -58,6 +58,17 @@ pub async fn download(
 
     cmd.arg(url);
 
+    #[cfg(unix)]
+    use std::os::unix::process::CommandExt;
+
+    #[cfg(unix)]
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::setpgid(0, 0);
+            Ok(())
+        });
+    }
+
     info!("Running yt-dlp command: {:?}", cmd);
     let mut child = cmd
         .stdin(Stdio::null())
@@ -65,6 +76,19 @@ pub async fn download(
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()?;
+
+    struct KillProcessGroupOnDrop(Option<u32>);
+    impl Drop for KillProcessGroupOnDrop {
+        fn drop(&mut self) {
+            if let Some(pid) = self.0 {
+                #[cfg(unix)]
+                unsafe {
+                    libc::kill(-(pid as i32), libc::SIGKILL);
+                }
+            }
+        }
+    }
+    let mut _kill_guard = KillProcessGroupOnDrop(child.id());
 
     let stdout = child.stdout.take().unwrap();
     let mut reader = BufReader::new(stdout).lines();
@@ -109,6 +133,7 @@ pub async fn download(
             ));
         }
     };
+    _kill_guard.0 = None; // Disable kill on drop since it completed successfully
     if !status.success() {
         let stderr = error_log.lock().await.clone();
         error!("yt-dlp error: {}", stderr);
