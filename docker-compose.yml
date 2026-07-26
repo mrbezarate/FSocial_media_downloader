@@ -70,6 +70,25 @@ services:
       timeout: 3s
       retries: 5
 
+  # ─── PostgreSQL — User Profiles & Stats ──────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: fsocial-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: fsocial
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fsocial_secret}
+      POSTGRES_DB: fsocial
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fsocial"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   # ─── Telegram Gateway (Rust) ──────────────────────────────────────────────
   # Lightweight: handles commands, routing, FSM, publishes tasks to NATS
   # Listens for results from NATS and sends files to Telegram
@@ -96,6 +115,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
 
   # ─── Media/Audio Worker (Rust + yt-dlp + ffmpeg) ──────────────────────────
   # Scalable: docker compose up --scale worker=N
@@ -105,8 +126,10 @@ services:
       context: .
       dockerfile: Dockerfile.worker
     restart: unless-stopped
+    command: ["/app/worker", "--type", "free"]
     environment:
       TELOXIDE_TOKEN: "${TELOXIDE_TOKEN}"
+      TELEGRAM_API_URL: "http://telegram-bot-api:8081"
       NATS_URL: "nats://nats:4222"
       REDIS_URL: "redis://redis:6379"
       DATABASE_URL: "postgres://fsocial:${POSTGRES_PASSWORD:-fsocial_secret}@postgres:5432/fsocial"
@@ -125,6 +148,38 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  pre-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    restart: unless-stopped
+    command: ["/app/worker", "--type", "premium"]
+    environment:
+      TELOXIDE_TOKEN: "${TELOXIDE_TOKEN}"
+      TELEGRAM_API_URL: "http://telegram-bot-api:8081"
+      NATS_URL: "nats://nats:4222"
+      REDIS_URL: "redis://redis:6379"
+      DATABASE_URL: "postgres://fsocial:${POSTGRES_PASSWORD:-fsocial_secret}@postgres:5432/fsocial"
+      SHARED_DATA_PATH: "/shared_data"
+      SPOTIFY_CLIENT_ID: "${SPOTIFY_CLIENT_ID:-}"
+      SPOTIFY_CLIENT_SECRET: "${SPOTIFY_CLIENT_SECRET:-}"
+      PROXY_LIST: "${PROXY_LIST:-}"
+      COOKIES_PATH: "${COOKIES_PATH:-}"
+      MAX_CONCURRENT_DOWNLOADS: "${MAX_CONCURRENT_DOWNLOADS:-10}"
+      RUST_LOG: "${RUST_LOG:-info}"
+    volumes:
+      - shared_data:/shared_data
+      - ./cookies.txt:/app/cookies.txt
+    depends_on:
+      nats:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
 
 # ─── Named Volumes ─────────────────────────────────────────────────────────
 volumes:
@@ -135,4 +190,6 @@ volumes:
   nats_data:
     driver: local
   redis_data:
+    driver: local
+  postgres_data:
     driver: local

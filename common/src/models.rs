@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserSettings {
@@ -80,13 +80,27 @@ impl Quality {
             Quality::Audio128 => "bestaudio[abr<=128]/bestaudio/best",
             Quality::Audio256 => "bestaudio[abr<=256]/bestaudio/best",
             Quality::AudioBest => "bestaudio/best",
-            Quality::Video360p => "bestvideo[height<=360][vcodec^=avc]+bestaudio[acodec^=mp4a]/bestvideo[height<=360]+bestaudio/best[height<=360]",
-            Quality::Video480p => "bestvideo[height<=480][vcodec^=avc]+bestaudio[acodec^=mp4a]/bestvideo[height<=480]+bestaudio/best[height<=480]",
-            Quality::Video720p => "bestvideo[height<=720][vcodec^=avc]+bestaudio[acodec^=mp4a]/bestvideo[height<=720]+bestaudio/best[height<=720]",
-            Quality::Video1080p => "bestvideo[height<=1080][vcodec^=avc]+bestaudio[acodec^=mp4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]",
-            Quality::Video1440p => "bestvideo[height<=1440][vcodec^=avc]+bestaudio[acodec^=mp4a]/bestvideo[height<=1440]+bestaudio/best[height<=1440]",
-            Quality::Video4K => "bestvideo[height<=2160][vcodec^=avc]+bestaudio[acodec^=mp4a]/bestvideo[height<=2160]+bestaudio/best[height<=2160]",
-            Quality::Best => "bestvideo[vcodec^=avc]+bestaudio[acodec^=mp4a]/bestvideo+bestaudio/best",
+            Quality::Video360p => {
+                "bestvideo[height<=360][vcodec^=avc]+bestaudio[acodec^=mp4a]/bestvideo[height<=360]+bestaudio/best[height<=360]"
+            }
+            Quality::Video480p => {
+                "bestvideo[height<=480][vcodec^=avc]+bestaudio[acodec^=mp4a]/bestvideo[height<=480]+bestaudio/best[height<=480]"
+            }
+            Quality::Video720p => {
+                "bestvideo[height<=720][vcodec^=avc]+bestaudio[acodec^=mp4a]/bestvideo[height<=720]+bestaudio/best[height<=720]"
+            }
+            Quality::Video1080p => {
+                "bestvideo[height<=1080][vcodec^=avc]+bestaudio[acodec^=mp4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]"
+            }
+            Quality::Video1440p => {
+                "bestvideo[height<=1440][vcodec^=avc]+bestaudio[acodec^=mp4a]/bestvideo[height<=1440]+bestaudio/best[height<=1440]"
+            }
+            Quality::Video4K => {
+                "bestvideo[height<=2160][vcodec^=avc]+bestaudio[acodec^=mp4a]/bestvideo[height<=2160]+bestaudio/best[height<=2160]"
+            }
+            Quality::Best => {
+                "bestvideo[vcodec^=avc]+bestaudio[acodec^=mp4a]/bestvideo+bestaudio/best"
+            }
         }
     }
 
@@ -155,15 +169,14 @@ impl Quality {
 
     /// Returns the set of quality options for audio content
     pub fn audio_options() -> Vec<Quality> {
-        vec![
-            Quality::Audio128,
-            Quality::Audio256,
-            Quality::AudioBest,
-        ]
+        vec![Quality::Audio128, Quality::Audio256, Quality::AudioBest]
     }
 
     pub fn is_audio(&self) -> bool {
-        matches!(self, Quality::Audio128 | Quality::Audio256 | Quality::AudioBest)
+        matches!(
+            self,
+            Quality::Audio128 | Quality::Audio256 | Quality::AudioBest
+        )
     }
 
     pub fn downgrade(&self) -> Option<Quality> {
@@ -264,7 +277,15 @@ pub enum TaskStatus {
         cache_key: Option<String>,
     },
     PlaylistCompleted {
-        files: Vec<(String, String, Option<u64>, Option<String>, Option<String>, bool, Option<String>)>, // path, title, duration, performer, thumb_path, is_audio, cache_key
+        files: Vec<(
+            String,
+            String,
+            Option<u64>,
+            Option<String>,
+            Option<String>,
+            bool,
+            Option<String>,
+        )>, // path, title, duration, performer, thumb_path, is_audio, cache_key
         playlist_title: String,
         failed_count: u32,
         failed_items: Vec<String>,
@@ -309,7 +330,10 @@ impl SpotifyTrackMeta {
 
     /// Primary artist name
     pub fn primary_artist(&self) -> &str {
-        self.artists.first().map(|s| s.as_str()).unwrap_or("Unknown Artist")
+        self.artists
+            .first()
+            .map(|s| s.as_str())
+            .unwrap_or("Unknown Artist")
     }
 }
 

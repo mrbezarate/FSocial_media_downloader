@@ -19,12 +19,12 @@ pub async fn process_media_task(
 
     let mut attempts = 0;
     let max_attempts = if ctx.config.proxies_enabled() { 3 } else { 1 };
-    
+
     loop {
         attempts += 1;
         let proxy = ctx.proxy_pool.next();
         let tx_clone = progress_tx.clone();
-        
+
         match ytdlp::download(
             &ctx.config,
             &task.url,
@@ -32,19 +32,21 @@ pub async fn process_media_task(
             &ctx.config.shared_data_path,
             proxy,
             tx_clone,
-        ).await {
+        )
+        .await
+        {
             Ok(output) => {
                 if let Some(p) = proxy {
                     ctx.proxy_pool.mark_success(p);
                 }
-                
+
                 let cached = cache::CachedMedia {
                     file_path: output.file_path.clone(),
                     title: output.title.clone(),
                     duration: output.duration,
                 };
                 let _ = ctx.cache.set(&task.url, cached).await;
-                
+
                 let mut thumb_path = None;
                 if let Some(thumb_url) = output.thumbnail {
                     match crate::audio::tagger::download_cover(&thumb_url).await {
@@ -52,17 +54,29 @@ pub async fn process_media_task(
                             let cover_path = format!("{}_cover.jpg", output.file_path);
                             if let Ok(_) = tokio::fs::write(&cover_path, &cover_data).await {
                                 let _ = std::process::Command::new("ffmpeg")
-                                    .args(&["-y", "-i", &cover_path, "-vf", "scale=320:320:force_original_aspect_ratio=decrease", &format!("{}_tmp.jpg", cover_path)])
+                                    .args(&[
+                                        "-y",
+                                        "-i",
+                                        &cover_path,
+                                        "-vf",
+                                        "scale=320:320:force_original_aspect_ratio=decrease",
+                                        &format!("{}_tmp.jpg", cover_path),
+                                    ])
                                     .output();
-                                let _ = std::fs::rename(format!("{}_tmp.jpg", cover_path), &cover_path);
+                                let _ =
+                                    std::fs::rename(format!("{}_tmp.jpg", cover_path), &cover_path);
                                 thumb_path = Some(cover_path);
-                                
+
                                 // Optionally apply the cover to the MP3 metadata if it's audio
                                 if task.quality.is_audio() {
                                     // Use a dummy SpotifyTrackMeta to just set the cover and author
                                     let dummy_meta = fsocial_common::SpotifyTrackMeta {
                                         title: output.title.clone(),
-                                        artists: output.uploader.clone().map(|s| vec![s]).unwrap_or_default(),
+                                        artists: output
+                                            .uploader
+                                            .clone()
+                                            .map(|s| vec![s])
+                                            .unwrap_or_default(),
                                         album: "Single".to_string(),
                                         year: None,
                                         track_number: None,
@@ -72,7 +86,12 @@ pub async fn process_media_task(
                                         duration_ms: output.duration.unwrap_or(0) * 1000,
                                         genres: vec![],
                                     };
-                                    let _ = crate::audio::tagger::apply_tags(&output.file_path, &dummy_meta, Some(cover_data)).await;
+                                    let _ = crate::audio::tagger::apply_tags(
+                                        &output.file_path,
+                                        &dummy_meta,
+                                        Some(cover_data),
+                                    )
+                                    .await;
                                 }
                             }
                         }
@@ -93,18 +112,28 @@ pub async fn process_media_task(
                         duration_ms: output.duration.unwrap_or(0) * 1000,
                         genres: vec![],
                     };
-                    let _ = crate::audio::tagger::apply_tags(&output.file_path, &dummy_meta, None).await;
+                    let _ = crate::audio::tagger::apply_tags(&output.file_path, &dummy_meta, None)
+                        .await;
                 }
 
-                return Ok((output.file_path, output.title, output.duration, output.uploader, thumb_path));
+                return Ok((
+                    output.file_path,
+                    output.title,
+                    output.duration,
+                    output.uploader,
+                    thumb_path,
+                ));
             }
             Err(e) => {
                 if let Some(p) = proxy {
                     ctx.proxy_pool.mark_failed(p);
                 }
-                
+
                 if attempts >= max_attempts {
-                    warn!("Failed to download media after {} attempts. Last error: {:?}", attempts, e);
+                    warn!(
+                        "Failed to download media after {} attempts. Last error: {:?}",
+                        attempts, e
+                    );
                     return Err(e);
                 }
             }

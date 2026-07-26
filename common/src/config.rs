@@ -53,11 +53,9 @@ impl AppConfig {
 
             telegram_api_url: env::var("TELEGRAM_API_URL").ok(),
 
-            nats_url: env::var("NATS_URL")
-                .unwrap_or_else(|_| "nats://nats:4222".into()),
+            nats_url: env::var("NATS_URL").unwrap_or_else(|_| "nats://nats:4222".into()),
 
-            redis_url: env::var("REDIS_URL")
-                .unwrap_or_else(|_| "redis://redis:6379".into()),
+            redis_url: env::var("REDIS_URL").unwrap_or_else(|_| "redis://redis:6379".into()),
 
             database_url: env::var("DATABASE_URL")
                 .unwrap_or_else(|_| "postgres://fsocial:fsocial@postgres:5432/fsocial".into()),
@@ -69,7 +67,12 @@ impl AppConfig {
             spotify_client_secret: env::var("SPOTIFY_CLIENT_SECRET").ok(),
 
             proxy_list: env::var("PROXY_LIST")
-                .map(|s| s.split(',').map(|p| p.trim().to_string()).filter(|p| !p.is_empty()).collect())
+                .map(|s| {
+                    s.split(',')
+                        .map(|p| p.trim().to_string())
+                        .filter(|p| !p.is_empty())
+                        .collect()
+                })
                 .unwrap_or_default(),
 
             default_video_quality: Quality::Video720p,
@@ -80,11 +83,9 @@ impl AppConfig {
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(10),
 
-            ytdlp_path: env::var("YTDLP_PATH")
-                .unwrap_or_else(|_| "yt-dlp".into()),
+            ytdlp_path: env::var("YTDLP_PATH").unwrap_or_else(|_| "yt-dlp".into()),
 
-            ffmpeg_path: env::var("FFMPEG_PATH")
-                .unwrap_or_else(|_| "ffmpeg".into()),
+            ffmpeg_path: env::var("FFMPEG_PATH").unwrap_or_else(|_| "ffmpeg".into()),
 
             cookies_path: env::var("COOKIES_PATH").ok().filter(|s| !s.is_empty()),
         })

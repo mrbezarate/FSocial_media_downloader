@@ -48,7 +48,11 @@ impl MetadataCache {
                 self.l1.invalidate(url).await;
                 if let Ok(mut conn) = self.redis_pool.get().await {
                     let key = format!("media:{}", url);
-                    let _: () = redis::cmd("DEL").arg(key).query_async(&mut conn).await.unwrap_or(());
+                    let _: () = redis::cmd("DEL")
+                        .arg(key)
+                        .query_async(&mut conn)
+                        .await
+                        .unwrap_or(());
                 }
             }
         }
@@ -58,11 +62,18 @@ impl MetadataCache {
     pub async fn set(&self, url: &str, media: CachedMedia) -> Result<(), AppError> {
         self.l1.insert(url.to_string(), media.clone()).await;
 
-        let mut conn = self.redis_pool.get().await.map_err(|e| AppError::Redis(e.to_string()))?;
+        let mut conn = self
+            .redis_pool
+            .get()
+            .await
+            .map_err(|e| AppError::Redis(e.to_string()))?;
         let key = format!("media:{}", url);
         let json_str = serde_json::to_string(&media)?;
-        
-        let _: () = conn.set_ex(&key, json_str, 21600).await.map_err(|e| AppError::Redis(e.to_string()))?;
+
+        let _: () = conn
+            .set_ex(&key, json_str, 21600)
+            .await
+            .map_err(|e| AppError::Redis(e.to_string()))?;
         Ok(())
     }
 }

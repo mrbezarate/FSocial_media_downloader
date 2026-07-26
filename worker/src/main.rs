@@ -1,13 +1,13 @@
+use deadpool_redis::{Config as RedisConfig, Runtime};
 use fsocial_common::AppConfig;
 use std::sync::Arc;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
-use deadpool_redis::{Config as RedisConfig, Runtime};
 
 mod audio;
+mod info_handler;
 mod media;
 mod nats_consumer;
-mod info_handler;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -16,7 +16,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
-    info!("Starting fsocial-worker...");
+    let mut worker_type = "both".to_string();
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == "--type" {
+            if let Some(t) = args.next() {
+                worker_type = t;
+            }
+        }
+    }
+
+    info!("Starting fsocial-worker (type: {})...", worker_type);
 
     let config = AppConfig::from_env()?;
 
@@ -36,18 +46,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         redis_pool,
         cache,
         proxy_pool,
-        task_states: moka::future::Cache::builder().time_to_live(std::time::Duration::from_secs(4 * 3600)).build(),
+        task_states: moka::future::Cache::builder()
+            .time_to_live(std::time::Duration::from_secs(4 * 3600))
+            .build(),
     });
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
-    
+
     let ctx_clone = worker_ctx.clone();
     let worker_handle = tokio::spawn(async move {
-        nats_consumer::run(ctx_clone, shutdown_rx).await;
+        nats_consumer::run(ctx_clone, shutdown_rx, worker_type).await;
     });
 
     tokio::signal::ctrl_c().await?;
-    info!("Shutting down fsocial-worker gracefully. Waiting for ongoing downloads (timeout 120s)...");
+    info!(
+        "Shutting down fsocial-worker gracefully. Waiting for ongoing downloads (timeout 120s)..."
+    );
     let _ = shutdown_tx.send(true);
 
     match tokio::time::timeout(tokio::time::Duration::from_secs(120), worker_handle).await {

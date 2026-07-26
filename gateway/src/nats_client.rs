@@ -38,11 +38,25 @@ impl NatsClient {
         } else {
             subjects::DOWNLOAD_TASKS_FREE.to_string()
         };
-        self.jetstream
-            .publish(subject, payload.into())
-            .await
-            .map_err(|e| AppError::Nats(e.to_string()))?;
-        Ok(())
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            self.jetstream.publish(subject.clone(), payload.into()),
+        )
+        .await
+        {
+            Ok(Ok(_)) => Ok(()),
+            Ok(Err(e)) => {
+                tracing::error!("JetStream publish to {} failed: {:?}", subject, e);
+                Err(AppError::Nats(e.to_string()))
+            }
+            Err(_) => {
+                tracing::error!(
+                    "JetStream publish to {} TIMED OUT after 3 seconds!",
+                    subject
+                );
+                Err(AppError::Nats("JetStream publish timed out".into()))
+            }
+        }
     }
 
     pub async fn subscribe_results(&self) -> Result<async_nats::Subscriber, AppError> {
@@ -59,23 +73,36 @@ impl NatsClient {
             .map_err(|e| AppError::Nats(e.to_string()))
     }
 
-    pub async fn request_info(&self, req: &fsocial_common::InfoRequest) -> Result<fsocial_common::InfoResponse, AppError> {
+    pub async fn request_info(
+        &self,
+        req: &fsocial_common::InfoRequest,
+    ) -> Result<fsocial_common::InfoResponse, AppError> {
         let payload = serde_json::to_vec(req).map_err(|e| AppError::Nats(e.to_string()))?;
-        let req_future = self.client.request(subjects::INFO_REQUEST.to_string(), payload.into());
+        let req_future = self
+            .client
+            .request(subjects::INFO_REQUEST.to_string(), payload.into());
         let reply = tokio::time::timeout(std::time::Duration::from_secs(30), req_future)
             .await
             .map_err(|_| AppError::Nats("Request timed out after 30 seconds".into()))?
             .map_err(|e| AppError::Nats(e.to_string()))?;
-        let info_res: fsocial_common::InfoResponse = serde_json::from_slice(&reply.payload).map_err(|e| AppError::Nats(e.to_string()))?;
+        let info_res: fsocial_common::InfoResponse =
+            serde_json::from_slice(&reply.payload).map_err(|e| AppError::Nats(e.to_string()))?;
         if let Some(err_msg) = info_res.error {
-            return Err(AppError::YtDlp { message: err_msg, exit_code: -1 });
+            return Err(AppError::YtDlp {
+                message: err_msg,
+                exit_code: -1,
+            });
         }
         Ok(info_res)
     }
 
     pub async fn publish_command(&self, cmd: &fsocial_common::TaskCommand) -> Result<(), AppError> {
         let payload = serde_json::to_vec(cmd).map_err(|e| AppError::Nats(e.to_string()))?;
-        self.client.publish(fsocial_common::subjects::TASK_COMMANDS.to_string(), payload.into())
+        self.client
+            .publish(
+                fsocial_common::subjects::TASK_COMMANDS.to_string(),
+                payload.into(),
+            )
             .await
             .map_err(|e| AppError::Nats(e.to_string()))
     }

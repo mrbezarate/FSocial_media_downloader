@@ -1,10 +1,10 @@
+use base64::{Engine as _, engine::general_purpose::STANDARD as b64};
 use fsocial_common::{AppConfig, AppError, SpotifyTrackMeta};
 use reqwest::Client;
 use serde::Deserialize;
 use std::sync::RwLock;
 use std::time::{Duration, Instant};
 use tracing::info;
-use base64::{Engine as _, engine::general_purpose::STANDARD as b64};
 
 struct TokenData {
     token: String,
@@ -41,7 +41,9 @@ impl SpotifyClient {
         let auth_str = format!("{}:{}", client_id, client_secret);
         let b64_auth = b64.encode(auth_str);
 
-        let res = self.client.post("https://accounts.spotify.com/api/token")
+        let res = self
+            .client
+            .post("https://accounts.spotify.com/api/token")
             .header("Authorization", format!("Basic {}", b64_auth))
             .form(&[("grant_type", "client_credentials")])
             .send()
@@ -52,8 +54,11 @@ impl SpotifyClient {
             return Err(AppError::Spotify(format!("Auth failed: {}", res.status())));
         }
 
-        let token_res: TokenResponse = res.json().await.map_err(|e| AppError::Spotify(e.to_string()))?;
-        
+        let token_res: TokenResponse = res
+            .json()
+            .await
+            .map_err(|e| AppError::Spotify(e.to_string()))?;
+
         let mut td = self.token_data.write().unwrap();
         *td = Some(TokenData {
             token: token_res.access_token,
@@ -74,10 +79,14 @@ impl SpotifyClient {
         };
 
         if needs_auth {
-            if let (Some(id), Some(secret)) = (&config.spotify_client_id, &config.spotify_client_secret) {
+            if let (Some(id), Some(secret)) =
+                (&config.spotify_client_id, &config.spotify_client_secret)
+            {
                 self.authenticate(id, secret).await?;
             } else {
-                return Err(AppError::Spotify("Spotify credentials not configured".into()));
+                return Err(AppError::Spotify(
+                    "Spotify credentials not configured".into(),
+                ));
             }
         }
 
@@ -85,32 +94,45 @@ impl SpotifyClient {
         Ok(td.as_ref().unwrap().token.clone())
     }
 
-    pub async fn get_track(&self, config: &AppConfig, track_id: &str) -> Result<SpotifyTrackMeta, AppError> {
+    pub async fn get_track(
+        &self,
+        config: &AppConfig,
+        track_id: &str,
+    ) -> Result<SpotifyTrackMeta, AppError> {
         // Try official API first
         if let Ok(token) = self.ensure_token(config).await {
-            let res = self.client.get(format!("https://api.spotify.com/v1/tracks/{}", track_id))
+            let res = self
+                .client
+                .get(format!("https://api.spotify.com/v1/tracks/{}", track_id))
                 .bearer_auth(token)
                 .send()
                 .await;
-                
+
             if let Ok(res) = res {
                 if res.status().is_success() {
                     if let Ok(v) = res.json::<serde_json::Value>().await {
                         let title = v["name"].as_str().unwrap_or("Unknown").to_string();
-                        let artists = v["artists"].as_array()
-                            .map(|a| a.iter().filter_map(|x| x["name"].as_str().map(String::from)).collect())
+                        let artists = v["artists"]
+                            .as_array()
+                            .map(|a| {
+                                a.iter()
+                                    .filter_map(|x| x["name"].as_str().map(String::from))
+                                    .collect()
+                            })
                             .unwrap_or_default();
                         let album = v["album"]["name"].as_str().unwrap_or("Unknown").to_string();
-                        
-                        let year = v["album"]["release_date"].as_str()
+
+                        let year = v["album"]["release_date"]
+                            .as_str()
                             .and_then(|d| d.split('-').next())
                             .and_then(|y| y.parse::<u32>().ok());
-                            
-                        let cover_url = v["album"]["images"].as_array()
+
+                        let cover_url = v["album"]["images"]
+                            .as_array()
                             .and_then(|arr| arr.first())
                             .and_then(|img| img["url"].as_str())
                             .map(String::from);
-                            
+
                         let track_number = v["track_number"].as_u64().map(|n| n as u32);
                         let duration_ms = v["duration_ms"].as_u64().unwrap_or(0);
 
@@ -130,10 +152,15 @@ impl SpotifyClient {
                 }
             }
         }
-        
+
         // Fallback: Web Scraping without API key
-        info!("Falling back to web scraping for Spotify track: {}", track_id);
-        let html = self.client.get(format!("https://open.spotify.com/track/{}", track_id))
+        info!(
+            "Falling back to web scraping for Spotify track: {}",
+            track_id
+        );
+        let html = self
+            .client
+            .get(format!("https://open.spotify.com/track/{}", track_id))
             .send()
             .await
             .map_err(|e| AppError::Spotify(e.to_string()))?
@@ -141,13 +168,28 @@ impl SpotifyClient {
             .await
             .map_err(|e| AppError::Spotify(e.to_string()))?;
 
-        let title_re = regex::Regex::new(r#"<meta property="og:title" content="([^"]+)"\s*/?>"#).unwrap();
-        let desc_re = regex::Regex::new(r#"<meta property="og:description" content="([^"]+)"\s*/?>"#).unwrap();
-        let img_re = regex::Regex::new(r#"<meta property="og:image" content="([^"]+)"\s*/?>"#).unwrap();
+        let title_re =
+            regex::Regex::new(r#"<meta property="og:title" content="([^"]+)"\s*/?>"#).unwrap();
+        let desc_re =
+            regex::Regex::new(r#"<meta property="og:description" content="([^"]+)"\s*/?>"#)
+                .unwrap();
+        let img_re =
+            regex::Regex::new(r#"<meta property="og:image" content="([^"]+)"\s*/?>"#).unwrap();
 
-        let title = title_re.captures(&html).and_then(|c| c.get(1)).map(|m| m.as_str().to_string()).unwrap_or_else(|| "Unknown".to_string());
-        let desc = desc_re.captures(&html).and_then(|c| c.get(1)).map(|m| m.as_str().to_string()).unwrap_or_default();
-        let cover_url = img_re.captures(&html).and_then(|c| c.get(1)).map(|m| m.as_str().to_string());
+        let title = title_re
+            .captures(&html)
+            .and_then(|c| c.get(1))
+            .map(|m| m.as_str().to_string())
+            .unwrap_or_else(|| "Unknown".to_string());
+        let desc = desc_re
+            .captures(&html)
+            .and_then(|c| c.get(1))
+            .map(|m| m.as_str().to_string())
+            .unwrap_or_default();
+        let cover_url = img_re
+            .captures(&html)
+            .and_then(|c| c.get(1))
+            .map(|m| m.as_str().to_string());
 
         // desc is usually "Artist Name · Song · 2023"
         let parts: Vec<&str> = desc.split(" · ").collect();
@@ -170,10 +212,19 @@ impl SpotifyClient {
     }
 
     #[allow(dead_code)]
-    pub async fn get_playlist_tracks(&self, config: &AppConfig, playlist_id: &str) -> Result<Vec<SpotifyTrackMeta>, AppError> {
+    pub async fn get_playlist_tracks(
+        &self,
+        config: &AppConfig,
+        playlist_id: &str,
+    ) -> Result<Vec<SpotifyTrackMeta>, AppError> {
         let token = self.ensure_token(config).await?;
         // simplified pagination for example
-        let res = self.client.get(format!("https://api.spotify.com/v1/playlists/{}/tracks?limit=100", playlist_id))
+        let res = self
+            .client
+            .get(format!(
+                "https://api.spotify.com/v1/playlists/{}/tracks?limit=100",
+                playlist_id
+            ))
             .bearer_auth(token)
             .send()
             .await
@@ -183,19 +234,31 @@ impl SpotifyClient {
             return Err(AppError::Spotify(format!("API error: {}", res.status())));
         }
 
-        let v: serde_json::Value = res.json().await.map_err(|e| AppError::Spotify(e.to_string()))?;
+        let v: serde_json::Value = res
+            .json()
+            .await
+            .map_err(|e| AppError::Spotify(e.to_string()))?;
         let mut tracks = Vec::new();
-        
+
         if let Some(items) = v["items"].as_array() {
             for item in items {
                 if let Some(track) = item.get("track") {
                     let title = track["name"].as_str().unwrap_or("Unknown").to_string();
-                    let artists = track["artists"].as_array()
-                        .map(|a| a.iter().filter_map(|x| x["name"].as_str().map(String::from)).collect())
+                    let artists = track["artists"]
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|x| x["name"].as_str().map(String::from))
+                                .collect()
+                        })
                         .unwrap_or_default();
-                    let album = track["album"]["name"].as_str().unwrap_or("Unknown").to_string();
-                    
-                    let cover_url = track["album"]["images"].as_array()
+                    let album = track["album"]["name"]
+                        .as_str()
+                        .unwrap_or("Unknown")
+                        .to_string();
+
+                    let cover_url = track["album"]["images"]
+                        .as_array()
                         .and_then(|arr| arr.first())
                         .and_then(|img| img["url"].as_str())
                         .map(String::from);
@@ -219,21 +282,29 @@ impl SpotifyClient {
     }
 
     #[allow(dead_code)]
-    pub async fn get_album_tracks(&self, _config: &AppConfig, _album_id: &str) -> Result<Vec<SpotifyTrackMeta>, AppError> {
+    pub async fn get_album_tracks(
+        &self,
+        _config: &AppConfig,
+        _album_id: &str,
+    ) -> Result<Vec<SpotifyTrackMeta>, AppError> {
         // Full pagination implementation would mirror get_playlist_tracks
         Ok(vec![])
     }
 
-    pub async fn get_playlist_track_urls(&self, config: &AppConfig, playlist_id: &str) -> Result<Vec<String>, AppError> {
+    pub async fn get_playlist_track_urls(
+        &self,
+        config: &AppConfig,
+        playlist_id: &str,
+    ) -> Result<Vec<String>, AppError> {
         let mut urls = Vec::new();
         if let Ok(token) = self.ensure_token(config).await {
-            let mut url = format!("https://api.spotify.com/v1/playlists/{}/tracks?limit=100", playlist_id);
+            let mut url = format!(
+                "https://api.spotify.com/v1/playlists/{}/tracks?limit=100",
+                playlist_id
+            );
 
             loop {
-                let res = self.client.get(&url)
-                    .bearer_auth(&token)
-                    .send()
-                    .await;
+                let res = self.client.get(&url).bearer_auth(&token).send().await;
 
                 if let Ok(res) = res {
                     if res.status().is_success() {
@@ -242,7 +313,8 @@ impl SpotifyClient {
                                 for item in items {
                                     if let Some(track) = item.get("track") {
                                         if let Some(id) = track["id"].as_str() {
-                                            let track_url = format!("https://open.spotify.com/track/{}", id);
+                                            let track_url =
+                                                format!("https://open.spotify.com/track/{}", id);
                                             if !urls.contains(&track_url) {
                                                 urls.push(track_url);
                                             }
@@ -261,13 +333,22 @@ impl SpotifyClient {
                 break;
             }
         }
-        
+
         if urls.is_empty() {
-            info!("Falling back to web scraping for Spotify playlist: {}", playlist_id);
-            if let Ok(html) = self.client.get(format!("https://open.spotify.com/playlist/{}", playlist_id))
-                .send().await.and_then(|r| r.error_for_status()) {
+            info!(
+                "Falling back to web scraping for Spotify playlist: {}",
+                playlist_id
+            );
+            if let Ok(html) = self
+                .client
+                .get(format!("https://open.spotify.com/playlist/{}", playlist_id))
+                .send()
+                .await
+                .and_then(|r| r.error_for_status())
+            {
                 if let Ok(text) = html.text().await {
-                    let re = regex::Regex::new(r"https://open\.spotify\.com/track/[a-zA-Z0-9]+").unwrap();
+                    let re = regex::Regex::new(r"https://open\.spotify\.com/track/[a-zA-Z0-9]+")
+                        .unwrap();
                     for mat in re.find_iter(&text) {
                         let u = mat.as_str().to_string();
                         if !urls.contains(&u) {
@@ -280,16 +361,20 @@ impl SpotifyClient {
         Ok(urls)
     }
 
-    pub async fn get_album_track_urls(&self, config: &AppConfig, album_id: &str) -> Result<Vec<String>, AppError> {
+    pub async fn get_album_track_urls(
+        &self,
+        config: &AppConfig,
+        album_id: &str,
+    ) -> Result<Vec<String>, AppError> {
         let mut urls = Vec::new();
         if let Ok(token) = self.ensure_token(config).await {
-            let mut url = format!("https://api.spotify.com/v1/albums/{}/tracks?limit=50", album_id);
+            let mut url = format!(
+                "https://api.spotify.com/v1/albums/{}/tracks?limit=50",
+                album_id
+            );
 
             loop {
-                let res = self.client.get(&url)
-                    .bearer_auth(&token)
-                    .send()
-                    .await;
+                let res = self.client.get(&url).bearer_auth(&token).send().await;
 
                 if let Ok(res) = res {
                     if res.status().is_success() {
@@ -297,7 +382,8 @@ impl SpotifyClient {
                             if let Some(items) = v["items"].as_array() {
                                 for track in items {
                                     if let Some(id) = track["id"].as_str() {
-                                        let track_url = format!("https://open.spotify.com/track/{}", id);
+                                        let track_url =
+                                            format!("https://open.spotify.com/track/{}", id);
                                         if !urls.contains(&track_url) {
                                             urls.push(track_url);
                                         }
@@ -317,11 +403,20 @@ impl SpotifyClient {
         }
 
         if urls.is_empty() {
-            info!("Falling back to web scraping for Spotify album: {}", album_id);
-            if let Ok(html) = self.client.get(format!("https://open.spotify.com/album/{}", album_id))
-                .send().await.and_then(|r| r.error_for_status()) {
+            info!(
+                "Falling back to web scraping for Spotify album: {}",
+                album_id
+            );
+            if let Ok(html) = self
+                .client
+                .get(format!("https://open.spotify.com/album/{}", album_id))
+                .send()
+                .await
+                .and_then(|r| r.error_for_status())
+            {
                 if let Ok(text) = html.text().await {
-                    let re = regex::Regex::new(r"https://open\.spotify\.com/track/[a-zA-Z0-9]+").unwrap();
+                    let re = regex::Regex::new(r"https://open\.spotify\.com/track/[a-zA-Z0-9]+")
+                        .unwrap();
                     for mat in re.find_iter(&text) {
                         let u = mat.as_str().to_string();
                         if !urls.contains(&u) {
@@ -335,7 +430,8 @@ impl SpotifyClient {
     }
 
     pub fn parse_spotify_url(url: &str) -> Option<(SpotifyType, String)> {
-        let re = regex::Regex::new(r"open\.spotify\.com/(track|album|playlist)/([a-zA-Z0-9]+)").unwrap();
+        let re =
+            regex::Regex::new(r"open\.spotify\.com/(track|album|playlist)/([a-zA-Z0-9]+)").unwrap();
         if let Some(caps) = re.captures(url) {
             let t = match &caps[1] {
                 "track" => SpotifyType::Track,

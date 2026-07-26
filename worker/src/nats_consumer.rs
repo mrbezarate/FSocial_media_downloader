@@ -1,11 +1,11 @@
 use crate::{audio, media};
 use async_nats::jetstream::{self, consumer::pull::Config};
+use fsocial_common::subjects;
 use fsocial_common::{AppConfig, DownloadTask, Platform, TaskResult, TaskStatus};
 use futures::StreamExt;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 use tracing::{error, info};
-use fsocial_common::subjects;
 
 pub struct WorkerContext {
     pub config: AppConfig,
@@ -20,7 +20,10 @@ pub struct WorkerContext {
 
 pub async fn publish_result(client: &async_nats::Client, result: &TaskResult) {
     let payload = serde_json::to_vec(result).unwrap();
-    if let Err(e) = client.publish(subjects::TASK_RESULTS.to_string(), payload.into()).await {
+    if let Err(e) = client
+        .publish(subjects::TASK_RESULTS.to_string(), payload.into())
+        .await
+    {
         error!("Failed to publish TaskResult: {:?}", e);
     }
 }
@@ -46,7 +49,13 @@ pub async fn publish_progress(
         },
     };
     let payload = serde_json::to_vec(&res).unwrap();
-    if let Err(e) = client.publish(fsocial_common::subjects::TASK_PROGRESS.to_string(), payload.into()).await {
+    if let Err(e) = client
+        .publish(
+            fsocial_common::subjects::TASK_PROGRESS.to_string(),
+            payload.into(),
+        )
+        .await
+    {
         tracing::error!("Failed to publish TaskProgress: {:?}", e);
     }
 }
@@ -74,13 +83,24 @@ pub async fn publish_playlist_progress(
         },
     };
     let payload = serde_json::to_vec(&res).unwrap();
-    if let Err(e) = client.publish(fsocial_common::subjects::TASK_PROGRESS.to_string(), payload.into()).await {
+    if let Err(e) = client
+        .publish(
+            fsocial_common::subjects::TASK_PROGRESS.to_string(),
+            payload.into(),
+        )
+        .await
+    {
         tracing::error!("Failed to publish TaskProgress: {:?}", e);
     }
 }
 
-pub async fn run(ctx: Arc<WorkerContext>, mut shutdown_rx: tokio::sync::watch::Receiver<bool>) {
-    let stream = match ctx.nats_jetstream
+pub async fn run(
+    ctx: Arc<WorkerContext>,
+    mut shutdown_rx: tokio::sync::watch::Receiver<bool>,
+    worker_type: String,
+) {
+    let stream = match ctx
+        .nats_jetstream
         .get_or_create_stream(async_nats::jetstream::stream::Config {
             name: subjects::STREAM_NAME.to_string(),
             subjects: vec![subjects::DOWNLOAD_TASKS_WILDCARD.to_string()],
@@ -124,19 +144,31 @@ pub async fn run(ctx: Arc<WorkerContext>, mut shutdown_rx: tokio::sync::watch::R
         .expect("Failed to create free consumer");
 
     let semaphore = Arc::new(Semaphore::new(ctx.config.max_concurrent_downloads));
-    let mut premium_messages = premium_consumer.messages().await.expect("Failed to get messages");
-    let mut free_messages = free_consumer.messages().await.expect("Failed to get messages");
+    let mut premium_messages = premium_consumer
+        .messages()
+        .await
+        .expect("Failed to get messages");
+    let mut free_messages = free_consumer
+        .messages()
+        .await
+        .expect("Failed to get messages");
 
     crate::info_handler::start_info_listener(ctx.clone()).await;
 
-    let cancel_sub = ctx.nats_client.subscribe(fsocial_common::subjects::TASK_COMMANDS.to_string()).await;
+    let cancel_sub = ctx
+        .nats_client
+        .subscribe(fsocial_common::subjects::TASK_COMMANDS.to_string())
+        .await;
     if let Ok(mut sub) = cancel_sub {
         let task_states_clone = ctx.task_states.clone();
         tokio::spawn(async move {
             info!("Listening for TaskCommands...");
             while let Some(msg) = sub.next().await {
-                if let Ok(cmd) = serde_json::from_slice::<fsocial_common::TaskCommand>(&msg.payload) {
-                    task_states_clone.insert(cmd.task_id.clone(), cmd.action).await;
+                if let Ok(cmd) = serde_json::from_slice::<fsocial_common::TaskCommand>(&msg.payload)
+                {
+                    task_states_clone
+                        .insert(cmd.task_id.clone(), cmd.action)
+                        .await;
                 }
             }
         });
@@ -145,6 +177,8 @@ pub async fn run(ctx: Arc<WorkerContext>, mut shutdown_rx: tokio::sync::watch::R
     info!("Worker started, listening for tasks...");
 
     let progress_re = regex::Regex::new(r"\[download\]\s+(?P<percent>[\d\.]+)%\s+of\s+~?\s*(?P<size>[^\s]+)(?:\s+at\s+(?P<speed>[^\s]+))?(?:\s+ETA\s+(?P<eta>[\d:]+))?").unwrap();
+
+    let mut premium_streak = 0;
 
     loop {
         let permit = tokio::select! {
@@ -163,17 +197,71 @@ pub async fn run(ctx: Arc<WorkerContext>, mut shutdown_rx: tokio::sync::watch::R
             }
         };
 
-        let msg_res_opt = tokio::select! {
-            biased;
-            _ = shutdown_rx.changed() => {
-                if *shutdown_rx.borrow() {
-                    info!("Shutdown signal received while waiting for message.");
-                    break;
+        let msg_res_opt = match worker_type.as_str() {
+            "premium" => {
+                tokio::select! {
+                    _ = shutdown_rx.changed() => {
+                        if *shutdown_rx.borrow() {
+                            info!("Shutdown signal received while waiting for message.");
+                            break;
+                        }
+                        continue;
+                    }
+                    opt = premium_messages.next() => opt,
                 }
-                continue;
             }
-            opt = premium_messages.next() => opt,
-            opt = free_messages.next() => opt,
+            "free" => {
+                tokio::select! {
+                    _ = shutdown_rx.changed() => {
+                        if *shutdown_rx.borrow() {
+                            info!("Shutdown signal received while waiting for message.");
+                            break;
+                        }
+                        continue;
+                    }
+                    opt = free_messages.next() => opt,
+                }
+            }
+            _ => {
+                if premium_streak < 5 {
+                    tokio::select! {
+                        biased;
+                        _ = shutdown_rx.changed() => {
+                            if *shutdown_rx.borrow() {
+                                info!("Shutdown signal received while waiting for message.");
+                                break;
+                            }
+                            continue;
+                        }
+                        opt = premium_messages.next() => {
+                            premium_streak += 1;
+                            opt
+                        }
+                        opt = free_messages.next() => {
+                            premium_streak = 0;
+                            opt
+                        }
+                    }
+                } else {
+                    tokio::select! {
+                        biased;
+                        _ = shutdown_rx.changed() => {
+                            if *shutdown_rx.borrow() {
+                                info!("Shutdown signal received while waiting for message.");
+                                break;
+                            }
+                            continue;
+                        }
+                        opt = free_messages.next() => {
+                            premium_streak = 0;
+                            opt
+                        }
+                        opt = premium_messages.next() => {
+                            opt
+                        }
+                    }
+                }
+            }
         };
 
         let msg_res = match msg_res_opt {
@@ -209,8 +297,9 @@ pub async fn run(ctx: Arc<WorkerContext>, mut shutdown_rx: tokio::sync::watch::R
                 task.chat_id,
                 task.status_message_id,
                 0,
-                "Начинаю загрузку..."
-            ).await;
+                "Начинаю загрузку...",
+            )
+            .await;
 
             let (tx, mut rx) = tokio::sync::mpsc::channel::<fsocial_common::ProgressEvent>(100);
             let ctx_prog = ctx_clone.clone();
@@ -221,27 +310,42 @@ pub async fn run(ctx: Arc<WorkerContext>, mut shutdown_rx: tokio::sync::watch::R
 
             fn format_eta(eta: &str) -> Option<String> {
                 let cleaned = eta.replace("~", "").replace("?", "");
-                if cleaned.is_empty() { return None; }
+                if cleaned.is_empty() {
+                    return None;
+                }
                 let parts: Vec<&str> = cleaned.split(':').collect();
                 let mut result = String::new();
                 if parts.len() == 3 {
                     let h = parts[0].parse::<u32>().unwrap_or(0);
                     let m = parts[1].parse::<u32>().unwrap_or(0);
                     let s = parts[2].parse::<u32>().unwrap_or(0);
-                    if h > 0 { result.push_str(&format!("{} ч ", h)); }
-                    if m > 0 { result.push_str(&format!("{} мин ", m)); }
-                    if s > 0 || (h == 0 && m == 0) { result.push_str(&format!("{} сек", s)); }
+                    if h > 0 {
+                        result.push_str(&format!("{} ч ", h));
+                    }
+                    if m > 0 {
+                        result.push_str(&format!("{} мин ", m));
+                    }
+                    if s > 0 || (h == 0 && m == 0) {
+                        result.push_str(&format!("{} сек", s));
+                    }
                 } else if parts.len() == 2 {
                     let m = parts[0].parse::<u32>().unwrap_or(0);
                     let s = parts[1].parse::<u32>().unwrap_or(0);
-                    if m > 0 { result.push_str(&format!("{} мин ", m)); }
-                    if s > 0 || m == 0 { result.push_str(&format!("{} сек", s)); }
-                } else { return None; }
+                    if m > 0 {
+                        result.push_str(&format!("{} мин ", m));
+                    }
+                    if s > 0 || m == 0 {
+                        result.push_str(&format!("{} сек", s));
+                    }
+                } else {
+                    return None;
+                }
                 Some(result.trim().to_string())
             }
 
             tokio::spawn(async move {
-                let mut last_update = tokio::time::Instant::now() - tokio::time::Duration::from_secs(10);
+                let mut last_update =
+                    tokio::time::Instant::now() - tokio::time::Duration::from_secs(10);
                 let mut current_idx = 0;
                 let mut total_tracks = 1;
 
@@ -253,21 +357,32 @@ pub async fn run(ctx: Arc<WorkerContext>, mut shutdown_rx: tokio::sync::watch::R
                         }
                         fsocial_common::ProgressEvent::Line(line) => {
                             if let Some(caps) = re.captures(&line) {
-                                if let (Some(p), Some(_size)) = (caps.name("percent"), caps.name("size")) {
+                                if let (Some(p), Some(_size)) =
+                                    (caps.name("percent"), caps.name("size"))
+                                {
                                     if let Ok(percent) = p.as_str().parse::<f32>() {
                                         let pct = percent as u8;
-                                        
-                                        if last_update.elapsed().as_secs_f32() >= 3.5 || pct == 100 {
+
+                                        if last_update.elapsed().as_secs_f32() >= 3.5 || pct == 100
+                                        {
                                             last_update = tokio::time::Instant::now();
                                             let eta = caps.name("eta").map_or("?", |m| m.as_str());
-                                            
+
                                             let mut text = format!("Скачивание: {}%", pct);
                                             if let Some(formatted_eta) = format_eta(eta) {
-                                                text = format!("{} | Осталось: {}", text, formatted_eta);
+                                                text = format!(
+                                                    "{} | Осталось: {}",
+                                                    text, formatted_eta
+                                                );
                                             }
 
                                             if is_playlist_mode_prog {
-                                                text = format!("Скачивание плейлиста: {}/{}\n⏳ {}", current_idx + 1, total_tracks, text);
+                                                text = format!(
+                                                    "Скачивание плейлиста: {}/{}\n⏳ {}",
+                                                    current_idx + 1,
+                                                    total_tracks,
+                                                    text
+                                                );
                                                 publish_playlist_progress(
                                                     &ctx_prog.nats_client,
                                                     &task_id_prog,
@@ -275,8 +390,9 @@ pub async fn run(ctx: Arc<WorkerContext>, mut shutdown_rx: tokio::sync::watch::R
                                                     status_msg_id_prog,
                                                     (current_idx + 1) as u32,
                                                     total_tracks as u32,
-                                                    &text
-                                                ).await;
+                                                    &text,
+                                                )
+                                                .await;
                                             } else {
                                                 publish_progress(
                                                     &ctx_prog.nats_client,
@@ -284,8 +400,9 @@ pub async fn run(ctx: Arc<WorkerContext>, mut shutdown_rx: tokio::sync::watch::R
                                                     chat_id_prog,
                                                     status_msg_id_prog,
                                                     pct,
-                                                    &text
-                                                ).await;
+                                                    &text,
+                                                )
+                                                .await;
                                             }
                                         }
                                     }
@@ -306,15 +423,23 @@ pub async fn run(ctx: Arc<WorkerContext>, mut shutdown_rx: tokio::sync::watch::R
             if task.platform == Platform::Spotify && urls_to_process.len() == 1 {
                 let url = &urls_to_process[0];
                 if url.contains("/playlist/") || url.contains("/album/") {
-                    if let Some((stype, sid)) = audio::spotify::SpotifyClient::parse_spotify_url(url) {
+                    if let Some((stype, sid)) =
+                        audio::spotify::SpotifyClient::parse_spotify_url(url)
+                    {
                         let spotify_client = audio::spotify::SpotifyClient::new();
                         let mut expanded = Vec::new();
                         if stype == audio::spotify::SpotifyType::Playlist {
-                            if let Ok(u) = spotify_client.get_playlist_track_urls(&ctx_clone.config, &sid).await {
+                            if let Ok(u) = spotify_client
+                                .get_playlist_track_urls(&ctx_clone.config, &sid)
+                                .await
+                            {
                                 expanded = u;
                             }
                         } else if stype == audio::spotify::SpotifyType::Album {
-                            if let Ok(u) = spotify_client.get_album_track_urls(&ctx_clone.config, &sid).await {
+                            if let Ok(u) = spotify_client
+                                .get_album_track_urls(&ctx_clone.config, &sid)
+                                .await
+                            {
                                 expanded = u;
                             }
                         }
@@ -326,7 +451,7 @@ pub async fn run(ctx: Arc<WorkerContext>, mut shutdown_rx: tokio::sync::watch::R
             }
             let total = urls_to_process.len();
             let is_playlist_mode = total > 1;
-            
+
             let mut completed_files = Vec::new();
             let mut failed_items = Vec::new();
             let mut first_error = None;
@@ -335,7 +460,7 @@ pub async fn run(ctx: Arc<WorkerContext>, mut shutdown_rx: tokio::sync::watch::R
             let tx_for_stream = tx.clone();
             let task_for_stream = task.clone();
             let ctx_for_stream = ctx_clone.clone();
-            
+
             let mut stream = futures::stream::iter(urls_to_process.into_iter().enumerate())
                 .map(move |(idx, url)| {
                     let mut current_task = task_for_stream.clone();
@@ -343,7 +468,7 @@ pub async fn run(ctx: Arc<WorkerContext>, mut shutdown_rx: tokio::sync::watch::R
                     current_task.spotify_meta = None;
                     let ctx_clone = ctx_for_stream.clone();
                     let tx_clone = tx_for_stream.clone();
-                    
+
                     async move {
                         if is_playlist_mode {
                             let mut is_aborted = false;
@@ -373,7 +498,7 @@ pub async fn run(ctx: Arc<WorkerContext>, mut shutdown_rx: tokio::sync::watch::R
 
                         while attempts < max_attempts {
                             attempts += 1;
-                            
+
                             let abort_future = async {
                                 loop {
                                     if let Some(state) = ctx_clone.task_states.get(&current_task.task_id).await {
@@ -415,7 +540,7 @@ pub async fn run(ctx: Arc<WorkerContext>, mut shutdown_rx: tokio::sync::watch::R
                                             if let Some(thumb) = &res.4 {
                                                 let _ = tokio::fs::remove_file(thumb).await;
                                             }
-                                            
+
                                             if let Some(lower_quality) = current_task.quality.downgrade() {
                                                 tracing::info!("File too big ({:.1}MB), downgrading from {:?} to {:?}", size_mb, current_task.quality, lower_quality);
                                                 let _ = tx_clone.send(fsocial_common::ProgressEvent::Line(format!("⚠️ Слишком большой файл ({:.1}MB). Пробуем качество ниже...", size_mb))).await;
@@ -453,19 +578,36 @@ pub async fn run(ctx: Arc<WorkerContext>, mut shutdown_rx: tokio::sync::watch::R
                                 if let Ok(mut conn) = ctx_clone.redis_pool.get().await {
                                     let bytes_key = format!("today_bytes:{}", task.user_id);
                                     let dl_key = format!("today_downloads:{}", task.user_id);
-                                    
-                                    let _ : redis::RedisResult<()> = redis::pipe()
-                                        .cmd("INCRBY").arg(&bytes_key).arg(size)
-                                        .cmd("EXPIRE").arg(&bytes_key).arg(86400)
-                                        .cmd("INCR").arg(&dl_key)
-                                        .cmd("EXPIRE").arg(&dl_key).arg(86400)
-                                        .query_async(&mut conn).await;
+
+                                    let _: redis::RedisResult<()> = redis::pipe()
+                                        .cmd("INCRBY")
+                                        .arg(&bytes_key)
+                                        .arg(size)
+                                        .cmd("EXPIRE")
+                                        .arg(&bytes_key)
+                                        .arg(86400)
+                                        .cmd("INCR")
+                                        .arg(&dl_key)
+                                        .cmd("EXPIRE")
+                                        .arg(&dl_key)
+                                        .arg(86400)
+                                        .query_async(&mut conn)
+                                        .await;
                                 }
                             }
                         }
-                        
-                        let cache_key = Some(format!("file_id:{}:{}", final_quality.callback_id(), url));
-                        completed_files.push((file_path, title, duration_secs, performer, thumb_path, final_quality.is_audio(), cache_key));
+
+                        let cache_key =
+                            Some(format!("file_id:{}:{}", final_quality.callback_id(), url));
+                        completed_files.push((
+                            file_path,
+                            title,
+                            duration_secs,
+                            performer,
+                            thumb_path,
+                            final_quality.is_audio(),
+                            cache_key,
+                        ));
                     }
                     Err(e) => {
                         if first_error.is_none() {
@@ -483,7 +625,9 @@ pub async fn run(ctx: Arc<WorkerContext>, mut shutdown_rx: tokio::sync::watch::R
 
             if is_playlist_mode {
                 if completed_files.is_empty() {
-                    let e = first_error.unwrap_or(fsocial_common::AppError::Download("Плейлист пуст или ошибка скачивания".into()));
+                    let e = first_error.unwrap_or(fsocial_common::AppError::Download(
+                        "Плейлист пуст или ошибка скачивания".into(),
+                    ));
                     let res = TaskResult {
                         task_id: task.task_id.clone(),
                         chat_id: task.chat_id,
@@ -500,7 +644,9 @@ pub async fn run(ctx: Arc<WorkerContext>, mut shutdown_rx: tokio::sync::watch::R
                     if !e.is_retryable() {
                         let _ = msg.ack().await;
                     } else {
-                        let _ = msg.ack_with(async_nats::jetstream::AckKind::Nak(None)).await;
+                        let _ = msg
+                            .ack_with(async_nats::jetstream::AckKind::Nak(None))
+                            .await;
                     }
                 } else {
                     let completed_files_len = completed_files.len();
@@ -539,10 +685,20 @@ pub async fn run(ctx: Arc<WorkerContext>, mut shutdown_rx: tokio::sync::watch::R
                     if !e.is_retryable() {
                         let _ = msg.ack().await;
                     } else {
-                        let _ = msg.ack_with(async_nats::jetstream::AckKind::Nak(None)).await;
+                        let _ = msg
+                            .ack_with(async_nats::jetstream::AckKind::Nak(None))
+                            .await;
                     }
                 } else if !completed_files.is_empty() {
-                    let (file_path, title, duration_secs, performer, thumb_path, is_audio, cache_key) = completed_files.remove(0);
+                    let (
+                        file_path,
+                        title,
+                        duration_secs,
+                        performer,
+                        thumb_path,
+                        is_audio,
+                        cache_key,
+                    ) = completed_files.remove(0);
                     let res = TaskResult {
                         task_id: task.task_id.clone(),
                         chat_id: task.chat_id,
@@ -566,8 +722,11 @@ pub async fn run(ctx: Arc<WorkerContext>, mut shutdown_rx: tokio::sync::watch::R
             }
         });
     }
-    
+
     info!("Waiting for ongoing tasks to finish...");
-    let _ = semaphore.acquire_many(ctx.config.max_concurrent_downloads as u32).await.unwrap();
+    let _ = semaphore
+        .acquire_many(ctx.config.max_concurrent_downloads as u32)
+        .await
+        .unwrap();
     info!("All tasks finished successfully.");
 }

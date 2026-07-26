@@ -71,12 +71,12 @@ impl AppError {
             | AppError::PlatformBlock { .. } => true,
             AppError::YtDlp { message, .. } => {
                 let msg_lower = message.to_lowercase();
-                msg_lower.contains("rehydration") ||
-                msg_lower.contains("blocked") ||
-                msg_lower.contains("captcha") ||
-                msg_lower.contains("connection") ||
-                msg_lower.contains("timeout")
-            },
+                msg_lower.contains("rehydration")
+                    || msg_lower.contains("blocked")
+                    || msg_lower.contains("captcha")
+                    || msg_lower.contains("connection")
+                    || msg_lower.contains("timeout")
+            }
             _ => false,
         }
     }

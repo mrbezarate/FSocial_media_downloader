@@ -36,7 +36,10 @@ pub fn detect(text: &str) -> Option<UrlMatch> {
 
 pub fn contains_url(msg: Message) -> bool {
     if let Some(text) = msg.text().or(msg.caption()) {
-        return msg.chat.is_private() || text.contains("http://") || text.contains("https://") || text.contains("www.");
+        return msg.chat.is_private()
+            || text.contains("http://")
+            || text.contains("https://")
+            || text.contains("www.");
     }
     false
 }
@@ -51,7 +54,7 @@ mod tests {
             "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
             "https://youtu.be/dQw4w9WgXcQ",
             "https://www.youtube.com/shorts/abcdefg",
-            "https://youtube.com/playlist?list=PLxyz123"
+            "https://youtube.com/playlist?list=PLxyz123",
         ];
         for url in urls {
             let m = detect(url).expect(&format!("Should detect {}", url));
@@ -64,7 +67,7 @@ mod tests {
         let urls = vec![
             "https://www.tiktok.com/@user/video/1234567890",
             "https://vm.tiktok.com/ZMxxxxxx/",
-            "https://vt.tiktok.com/ZSxxxxxx/"
+            "https://vt.tiktok.com/ZSxxxxxx/",
         ];
         for url in urls {
             let m = detect(url).expect(&format!("Should detect {}", url));
@@ -76,7 +79,7 @@ mod tests {
     fn test_instagram_urls() {
         let urls = vec![
             "https://www.instagram.com/reel/Cxxxxxx/",
-            "https://instagram.com/p/Cxxxxxx/"
+            "https://instagram.com/p/Cxxxxxx/",
         ];
         for url in urls {
             let m = detect(url).expect(&format!("Should detect {}", url));

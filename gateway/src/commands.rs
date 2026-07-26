@@ -17,7 +17,12 @@ pub enum Command {
     Admin(String),
 }
 
-pub async fn handle(bot: crate::MyBot, msg: Message, cmd: Command, redis_pool: deadpool_redis::Pool) -> ResponseResult<()> {
+pub async fn handle(
+    bot: crate::MyBot,
+    msg: Message,
+    cmd: Command,
+    redis_pool: deadpool_redis::Pool,
+) -> ResponseResult<()> {
     match cmd {
         Command::Start => {
             let text = "👋 <b>Привет! Я FSocial Media Downloader</b>\n—\n\
@@ -29,7 +34,9 @@ pub async fn handle(bot: crate::MyBot, msg: Message, cmd: Command, redis_pool: d
                         • SoundCloud\n\
                         • Pinterest\n\n\
                         Просто отправь ссылку для начала загрузки!";
-            bot.send_message(msg.chat.id, text).parse_mode(teloxide::types::ParseMode::Html).await?;
+            bot.send_message(msg.chat.id, text)
+                .parse_mode(teloxide::types::ParseMode::Html)
+                .await?;
         }
         Command::Help => {
             let text = "📖 <b>Как использовать:</b>\n\n\
@@ -37,7 +44,9 @@ pub async fn handle(bot: crate::MyBot, msg: Message, cmd: Command, redis_pool: d
                         2. Выберите качество из появившегося меню.\n\
                         3. Дождитесь окончания загрузки.\n\n\
                         В группах загрузка происходит автоматически, согласно настройкам по умолчанию (см. /settings).";
-            bot.send_message(msg.chat.id, text).parse_mode(teloxide::types::ParseMode::Html).await?;
+            bot.send_message(msg.chat.id, text)
+                .parse_mode(teloxide::types::ParseMode::Html)
+                .await?;
         }
         Command::Quality => {
             let text = "Команда /quality устарела. Пожалуйста, используйте /settings.";
@@ -45,11 +54,12 @@ pub async fn handle(bot: crate::MyBot, msg: Message, cmd: Command, redis_pool: d
         }
         Command::Settings => {
             let user_id = msg.from.as_ref().map(|u| u.id.0).unwrap_or(0);
-            
+
             let mut settings = fsocial_common::UserSettings::default();
             if let Ok(mut conn) = redis_pool.get().await {
                 let key = format!("user_settings:{}", user_id);
-                let res: redis::RedisResult<String> = redis::cmd("GET").arg(&key).query_async(&mut conn).await;
+                let res: redis::RedisResult<String> =
+                    redis::cmd("GET").arg(&key).query_async(&mut conn).await;
                 if let Ok(val) = res {
                     if let Ok(parsed) = serde_json::from_str::<fsocial_common::UserSettings>(&val) {
                         settings = parsed;
@@ -57,21 +67,37 @@ pub async fn handle(bot: crate::MyBot, msg: Message, cmd: Command, redis_pool: d
                 }
             }
 
-            let text = "🔧 <b>Настройки профиля</b>\n\nЗдесь вы можете настроить параметры загрузок.";
-            
+            let text =
+                "🔧 <b>Настройки профиля</b>\n\nЗдесь вы можете настроить параметры загрузок.";
+
             use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
-            
+
             let mut keyboard_rows = Vec::new();
-            
+
             if settings.auto_download {
-                keyboard_rows.push(vec![InlineKeyboardButton::callback("⚡ Авто", "toggle_mode")]);
-                keyboard_rows.push(vec![InlineKeyboardButton::callback(format!("📹 Видео: {:?}", settings.default_video), "setmenu|vid")]);
-                keyboard_rows.push(vec![InlineKeyboardButton::callback(format!("🎵 Аудио: {:?}", settings.default_audio), "setmenu|aud")]);
+                keyboard_rows.push(vec![InlineKeyboardButton::callback(
+                    "⚡ Авто",
+                    "toggle_mode",
+                )]);
+                keyboard_rows.push(vec![InlineKeyboardButton::callback(
+                    format!("📹 Видео: {:?}", settings.default_video),
+                    "setmenu|vid",
+                )]);
+                keyboard_rows.push(vec![InlineKeyboardButton::callback(
+                    format!("🎵 Аудио: {:?}", settings.default_audio),
+                    "setmenu|aud",
+                )]);
             } else {
-                keyboard_rows.push(vec![InlineKeyboardButton::callback("💬 Ручной", "toggle_mode")]);
+                keyboard_rows.push(vec![InlineKeyboardButton::callback(
+                    "💬 Ручной",
+                    "toggle_mode",
+                )]);
             }
-            
-            keyboard_rows.push(vec![InlineKeyboardButton::callback("💎 Premium", "buy_premium")]);
+
+            keyboard_rows.push(vec![InlineKeyboardButton::callback(
+                "💎 Premium",
+                "buy_premium",
+            )]);
 
             let keyboard = InlineKeyboardMarkup::new(keyboard_rows);
 
@@ -97,49 +123,78 @@ pub async fn handle(bot: crate::MyBot, msg: Message, cmd: Command, redis_pool: d
         Command::Admin(args) => {
             let admin_id_str = std::env::var("ADMIN_ID").unwrap_or_default();
             let admin_id: u64 = admin_id_str.parse().unwrap_or(0);
-            
+
             let user = msg.from.as_ref();
             let user_id = user.map(|u| u.id.0).unwrap_or(0);
-            let is_dev = user.and_then(|u| u.username.as_deref()).map(|name| name.eq_ignore_ascii_case("UndaOn")).unwrap_or(false);
-            
+            let is_dev = user
+                .and_then(|u| u.username.as_deref())
+                .map(|name| name.eq_ignore_ascii_case("UndaOn"))
+                .unwrap_or(false);
+
             if user_id == 0 || (user_id != admin_id && !is_dev) {
                 return Ok(());
             }
 
             let parts: Vec<&str> = args.split_whitespace().collect();
             if parts.is_empty() {
-                bot.send_message(msg.chat.id, "Использование:\n/admin give_premium <user_id> <days>").await?;
+                bot.send_message(
+                    msg.chat.id,
+                    "Использование:\n/admin give_premium <user_id> <days>",
+                )
+                .await?;
                 return Ok(());
             }
 
             if parts[0] == "give_premium" && parts.len() == 3 {
-                if let (Ok(target_id), Ok(days)) = (parts[1].parse::<u64>(), parts[2].parse::<i64>()) {
+                if let (Ok(target_id), Ok(days)) =
+                    (parts[1].parse::<u64>(), parts[2].parse::<i64>())
+                {
                     if let Ok(mut conn) = redis_pool.get().await {
                         let key = format!("user_settings:{}", target_id);
                         let mut target_settings = fsocial_common::UserSettings::default();
-                        
-                        let res: redis::RedisResult<String> = redis::cmd("GET").arg(&key).query_async(&mut conn).await;
+
+                        let res: redis::RedisResult<String> =
+                            redis::cmd("GET").arg(&key).query_async(&mut conn).await;
                         if let Ok(val) = res {
-                            if let Ok(parsed) = serde_json::from_str::<fsocial_common::UserSettings>(&val) {
+                            if let Ok(parsed) =
+                                serde_json::from_str::<fsocial_common::UserSettings>(&val)
+                            {
                                 target_settings = parsed;
                             }
                         }
-                        
+
                         let now = chrono::Utc::now().timestamp();
                         let current_until = target_settings.premium_until.unwrap_or(now).max(now);
                         target_settings.premium_until = Some(current_until + days * 86400);
-                        
+
                         if let Ok(json) = serde_json::to_string(&target_settings) {
-                            let _: redis::RedisResult<()> = redis::cmd("SET").arg(&key).arg(json).query_async(&mut conn).await;
-                            bot.send_message(msg.chat.id, format!("Успешно выдано {} дней Premium пользователю {}", days, target_id)).await?;
-                            let _ = bot.send_message(teloxide::types::ChatId(target_id as i64), format!("🎉 Вам был выдан Premium на {} дней!", days)).await;
+                            let _: redis::RedisResult<()> = redis::cmd("SET")
+                                .arg(&key)
+                                .arg(json)
+                                .query_async(&mut conn)
+                                .await;
+                            bot.send_message(
+                                msg.chat.id,
+                                format!(
+                                    "Успешно выдано {} дней Premium пользователю {}",
+                                    days, target_id
+                                ),
+                            )
+                            .await?;
+                            let _ = bot
+                                .send_message(
+                                    teloxide::types::ChatId(target_id as i64),
+                                    format!("🎉 Вам был выдан Premium на {} дней!", days),
+                                )
+                                .await;
                             return Ok(());
                         }
                     }
                 }
             }
-            
-            bot.send_message(msg.chat.id, "Команда не распознана или неверные аргументы.").await?;
+
+            bot.send_message(msg.chat.id, "Команда не распознана или неверные аргументы.")
+                .await?;
         }
     }
     Ok(())

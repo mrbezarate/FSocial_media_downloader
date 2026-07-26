@@ -1,7 +1,7 @@
 use fsocial_common::{AppConfig, DownloadTask};
 use teloxide::prelude::*;
 
-use crate::{nats_client::NatsClient, url_parser, UrlCache};
+use crate::{UrlCache, nats_client::NatsClient, url_parser};
 
 const SUPPORTED_SOURCES_INFO: &str = "\
 ❌ <b>Ошибка: Ссылка недействительна или источник не поддерживается.</b>\n\n\
@@ -51,7 +51,8 @@ pub async fn handle(
     let mut settings = fsocial_common::UserSettings::default();
     if let Ok(mut conn) = redis_pool.get().await {
         let key = format!("user_settings:{}", user_id);
-        let res: redis::RedisResult<String> = redis::cmd("GET").arg(&key).query_async(&mut conn).await;
+        let res: redis::RedisResult<String> =
+            redis::cmd("GET").arg(&key).query_async(&mut conn).await;
         if let Ok(val) = res {
             if let Ok(parsed) = serde_json::from_str::<fsocial_common::UserSettings>(&val) {
                 settings = parsed;
@@ -60,16 +61,27 @@ pub async fn handle(
     }
 
     let now = chrono::Utc::now().timestamp();
-    let is_premium = settings.premium_until.map(|until| until > now).unwrap_or(false);
+    let is_premium = settings
+        .premium_until
+        .map(|until| until > now)
+        .unwrap_or(false);
 
     if !is_premium && user_id > 0 {
         if let Ok(mut conn) = redis_pool.get().await {
             let dl_key = format!("today_downloads:{}", user_id);
             let bytes_key = format!("today_bytes:{}", user_id);
-            
-            let dls: u64 = redis::cmd("GET").arg(&dl_key).query_async(&mut conn).await.unwrap_or(0);
-            let bytes: u64 = redis::cmd("GET").arg(&bytes_key).query_async(&mut conn).await.unwrap_or(0);
-            
+
+            let dls: u64 = redis::cmd("GET")
+                .arg(&dl_key)
+                .query_async(&mut conn)
+                .await
+                .unwrap_or(0);
+            let bytes: u64 = redis::cmd("GET")
+                .arg(&bytes_key)
+                .query_async(&mut conn)
+                .await
+                .unwrap_or(0);
+
             if dls >= 200 || bytes >= 2147483648 {
                 let _ = bot.send_message(msg.chat.id, "Сегодня лимит бесплатных загрузок исчерпан. Он обновится через 24 часа или можно оформить Premium.")
                     .reply_parameters(teloxide::types::ReplyParameters::new(msg.id))
@@ -78,7 +90,9 @@ pub async fn handle(
             }
         }
     }
-    let bypass_info = is_group || url_match.platform == fsocial_common::Platform::Pinterest || settings.auto_download;
+    let bypass_info = is_group
+        || url_match.platform == fsocial_common::Platform::Pinterest
+        || settings.auto_download;
 
     if bypass_info {
         let default_quality = if url_match.platform == fsocial_common::Platform::Pinterest {
@@ -103,7 +117,10 @@ pub async fn handle(
         task.reply_to_message_id = Some(message_id);
 
         let keyboard = teloxide::types::InlineKeyboardMarkup::new(vec![vec![
-            teloxide::types::InlineKeyboardButton::callback("🛑 Отмена", format!("abort|{}", task.task_id))
+            teloxide::types::InlineKeyboardButton::callback(
+                "🛑 Отмена",
+                format!("abort|{}", task.task_id),
+            ),
         ]]);
 
         let status_msg = bot
@@ -117,7 +134,10 @@ pub async fn handle(
         let cache_key = format!("file_id:{}:{}", task.quality.callback_id(), task.url);
         let mut cached_file_id = None;
         if let Ok(mut conn) = redis_pool.get().await {
-            let res: redis::RedisResult<String> = redis::cmd("GET").arg(&cache_key).query_async(&mut conn).await;
+            let res: redis::RedisResult<String> = redis::cmd("GET")
+                .arg(&cache_key)
+                .query_async(&mut conn)
+                .await;
             if let Ok(fid) = res {
                 cached_file_id = Some(fid);
             }
@@ -137,7 +157,7 @@ pub async fn handle(
                     .reply_parameters(teloxide::types::ReplyParameters::new(msg.id))
                     .await
             };
-            
+
             if send_res.is_ok() {
                 let _ = bot.delete_message(msg.chat.id, status_msg.id).await;
                 return Ok(());
@@ -151,9 +171,14 @@ pub async fn handle(
                 .await?;
         }
     } else {
-        let req = fsocial_common::InfoRequest { url: url_match.url.clone() };
+        let req = fsocial_common::InfoRequest {
+            url: url_match.url.clone(),
+        };
         let short_id = uuid::Uuid::new_v4().to_string()[..8].to_string();
-        url_cache.lock().await.insert(short_id.clone(), url_match.url.clone());
+        url_cache
+            .lock()
+            .await
+            .insert(short_id.clone(), url_match.url.clone());
 
         match nats.request_info(&req).await {
             Ok(info) => {
@@ -166,7 +191,8 @@ pub async fn handle(
 
                 let max_size = if config.is_local_api() { 2000.0 } else { 50.0 };
                 let text = crate::ui::UiBuilder::build_info_message(&info, max_size);
-                let keyboard = crate::ui::UiBuilder::build_quality_keyboard(&info, &short_id, max_size);
+                let keyboard =
+                    crate::ui::UiBuilder::build_quality_keyboard(&info, &short_id, max_size);
 
                 let mut sent_photo = false;
                 if let Some(thumb_url) = info.thumbnail {
@@ -196,11 +222,14 @@ pub async fn handle(
                 return Ok(());
             }
             Err(e) => {
+                tracing::error!("request_info failed: {}", e);
                 // Link is broken, private or invalid -> delete user's message and inform
                 let _ = bot.delete_message(msg.chat.id, msg.id).await;
-                
+
                 let e_str = e.to_string();
-                let err_msg = if e_str.contains("Скачивание прямых") || e_str.contains("Скачивание фото") {
+                let err_msg = if e_str.contains("Скачивание прямых")
+                    || e_str.contains("Скачивание фото")
+                {
                     format!("❌ <b>Ошибка:</b>\n<i>{}</i>", e_str)
                 } else {
                     format!(
@@ -208,7 +237,7 @@ pub async fn handle(
                         e_str, SUPPORTED_SOURCES_INFO
                     )
                 };
-                
+
                 let _ = bot
                     .send_message(msg.chat.id, err_msg)
                     .parse_mode(teloxide::types::ParseMode::Html)

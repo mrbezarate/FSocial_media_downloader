@@ -36,7 +36,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let nats_client = NatsClient::connect(&config.nats_url)
         .await
         .expect("Failed to connect to NATS");
-    
+
     nats_client
         .setup_stream()
         .await
@@ -50,7 +50,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("Failed to create reqwest client");
 
     let token = std::env::var("TELOXIDE_TOKEN").expect("TELOXIDE_TOKEN must be set");
-    
+
     let base_bot = if let Some(ref url) = config.telegram_api_url {
         let api_url = url::Url::parse(url).expect("Invalid TELEGRAM_API_URL");
         Bot::with_client(token, client).set_api_url(api_url)
@@ -64,25 +64,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bot_clone = bot.clone();
     let nats_clone = nats_client.clone();
     let config_clone = config.clone();
-    
+
     let url_cache: UrlCache = Arc::new(Mutex::new(HashMap::new()));
     let task_states: TaskStates = moka::future::Cache::builder()
         .time_to_live(std::time::Duration::from_secs(4 * 3600))
         .build();
 
     let ts_clone = task_states.clone();
-    
+
     let redis_cfg = deadpool_redis::Config::from_url(&config.redis_url);
-    let redis_pool = redis_cfg.create_pool(Some(deadpool_redis::Runtime::Tokio1)).expect("Failed to create Redis pool");
+    let redis_pool = redis_cfg
+        .create_pool(Some(deadpool_redis::Runtime::Tokio1))
+        .expect("Failed to create Redis pool");
     let redis_pool_clone = redis_pool.clone();
 
     tokio::spawn(async move {
-        nats_listener::listen(bot_clone, nats_clone, config_clone, ts_clone, redis_pool_clone).await;
+        nats_listener::listen(
+            bot_clone,
+            nats_clone,
+            config_clone,
+            ts_clone,
+            redis_pool_clone,
+        )
+        .await;
     });
 
     info!("NATS listener started. Setting up Telegram handlers...");
 
     let handler = Update::filter_message()
+        .filter(|msg: Message| {
+            tracing::info!("Received message: {:?}", msg.text());
+            true
+        })
         .branch(
             dptree::entry()
                 .filter_command::<commands::Command>()
@@ -92,18 +105,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             dptree::filter(|msg: Message| msg.successful_payment().is_some())
                 .endpoint(handlers::payments::handle_successful_payment),
         )
-        .branch(
-            dptree::filter(url_parser::contains_url).endpoint(handlers::download::handle),
-        );
+        .branch(dptree::filter(url_parser::contains_url).endpoint(handlers::download::handle));
 
     let callback_handler = Update::filter_callback_query().endpoint(handlers::callback::handle);
     let inline_handler = Update::filter_inline_query().endpoint(handlers::inline::handle);
-    let pre_checkout_handler = Update::filter_pre_checkout_query().endpoint(handlers::payments::handle_pre_checkout_query);
+    let pre_checkout_handler =
+        Update::filter_pre_checkout_query().endpoint(handlers::payments::handle_pre_checkout_query);
 
-    let mut dispatcher = Dispatcher::builder(bot.clone(), dptree::entry().branch(handler).branch(callback_handler).branch(inline_handler).branch(pre_checkout_handler))
-        .dependencies(dptree::deps![nats_client.clone(), config.clone(), url_cache.clone(), task_states.clone(), redis_pool.clone()])
-        .enable_ctrlc_handler()
-        .build();
+    let mut dispatcher = Dispatcher::builder(
+        bot.clone(),
+        dptree::entry()
+            .branch(handler)
+            .branch(callback_handler)
+            .branch(inline_handler)
+            .branch(pre_checkout_handler),
+    )
+    .dependencies(dptree::deps![
+        nats_client.clone(),
+        config.clone(),
+        url_cache.clone(),
+        task_states.clone(),
+        redis_pool.clone()
+    ])
+    .enable_ctrlc_handler()
+    .build();
 
     let commands = vec![
         teloxide::types::BotCommand::new("start", "🚀 Запустить бота / Помощь"),

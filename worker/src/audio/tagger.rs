@@ -1,21 +1,35 @@
 use fsocial_common::{AppError, SpotifyTrackMeta};
-use reqwest::Client;
 use lofty::config::WriteOptions;
 use lofty::file::TaggedFileExt;
-use lofty::tag::{TagExt, ItemKey, Accessor};
-use lofty::picture::{Picture, PictureType, MimeType};
+use lofty::picture::{MimeType, Picture, PictureType};
+use lofty::tag::{Accessor, ItemKey, TagExt};
+use reqwest::Client;
 
 pub async fn download_cover(url: &str) -> Result<Vec<u8>, AppError> {
     let client = Client::new();
-    let res = client.get(url).send().await.map_err(|e| AppError::Http(e.to_string()))?;
+    let res = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| AppError::Http(e.to_string()))?;
     if !res.status().is_success() {
-        return Err(AppError::Http(format!("Failed to download cover: {}", res.status())));
+        return Err(AppError::Http(format!(
+            "Failed to download cover: {}",
+            res.status()
+        )));
     }
-    let bytes = res.bytes().await.map_err(|e| AppError::Http(e.to_string()))?;
+    let bytes = res
+        .bytes()
+        .await
+        .map_err(|e| AppError::Http(e.to_string()))?;
     Ok(bytes.to_vec())
 }
 
-pub async fn apply_tags(file_path: &str, meta: &SpotifyTrackMeta, cover_data: Option<Vec<u8>>) -> Result<(), AppError> {
+pub async fn apply_tags(
+    file_path: &str,
+    meta: &SpotifyTrackMeta,
+    cover_data: Option<Vec<u8>>,
+) -> Result<(), AppError> {
     let file_path = file_path.to_string();
     let meta = meta.clone();
 
@@ -29,11 +43,10 @@ pub async fn apply_tags(file_path: &str, meta: &SpotifyTrackMeta, cover_data: Op
         std::fs::copy(&file_path, &temp_path)
             .map_err(|e| AppError::Tagging(format!("Failed to copy to temp: {}", e)))?;
 
-        let mut tagged_file = lofty::read_from_path(&temp_path)
-            .map_err(|e| {
-                let _ = std::fs::remove_file(&temp_path);
-                AppError::Tagging(e.to_string())
-            })?;
+        let mut tagged_file = lofty::read_from_path(&temp_path).map_err(|e| {
+            let _ = std::fs::remove_file(&temp_path);
+            AppError::Tagging(e.to_string())
+        })?;
 
         let tag_type = tagged_file.primary_tag_type();
         let tag = match tagged_file.primary_tag_mut() {
@@ -63,12 +76,8 @@ pub async fn apply_tags(file_path: &str, meta: &SpotifyTrackMeta, cover_data: Op
         }
 
         if let Some(cover) = cover_data {
-            let pic = Picture::new_unchecked(
-                PictureType::CoverFront,
-                Some(MimeType::Jpeg),
-                None,
-                cover,
-            );
+            let pic =
+                Picture::new_unchecked(PictureType::CoverFront, Some(MimeType::Jpeg), None, cover);
             tag.push_picture(pic);
         }
 
@@ -77,11 +86,10 @@ pub async fn apply_tags(file_path: &str, meta: &SpotifyTrackMeta, cover_data: Op
             return Err(AppError::Tagging(e.to_string()));
         }
 
-        std::fs::rename(&temp_path, &file_path)
-            .map_err(|e| {
-                let _ = std::fs::remove_file(&temp_path);
-                AppError::Tagging(format!("Failed to rename temp: {}", e))
-            })?;
+        std::fs::rename(&temp_path, &file_path).map_err(|e| {
+            let _ = std::fs::remove_file(&temp_path);
+            AppError::Tagging(format!("Failed to rename temp: {}", e))
+        })?;
 
         Ok::<(), AppError>(())
     })

@@ -31,7 +31,7 @@ impl UiBuilder {
         lines.push(format!("📹 <b>{}</b>", html_escape(&info.title)));
 
         if let Some(ref author) = info.uploader {
-                lines.push(format!("👤 <i>{}</i>", html_escape(author)));
+            lines.push(format!("👤 <i>{}</i>", html_escape(author)));
         }
 
         if let Some(dur) = info.duration_secs {
@@ -68,7 +68,7 @@ impl UiBuilder {
                 36..=120 => "🚀",
                 _ => "⚖️",
             };
-            
+
             let size_str = if size_mb > 0 {
                 format!("{:>4}MB", size_mb)
             } else {
@@ -80,21 +80,37 @@ impl UiBuilder {
 
         lines.push(String::new());
         let has_large_files = info.available_qualities.iter().any(|q| {
-            q.filesize_bytes.map(|b| b as f64 / (1024.0 * 1024.0) > max_size_mb).unwrap_or(false)
+            q.filesize_bytes
+                .map(|b| b as f64 / (1024.0 * 1024.0) > max_size_mb)
+                .unwrap_or(false)
         });
 
         if has_large_files {
-            lines.push(format!("⚠️ Файлы > {} МБ не входят в ваш уровень подписки.", max_size_mb));
+            lines.push(format!(
+                "⚠️ Файлы > {} МБ не входят в ваш уровень подписки.",
+                max_size_mb
+            ));
         }
 
         lines.join("\n")
     }
 
-    pub fn build_quality_keyboard(info: &InfoResponse, short_id: &str, max_size_mb: f64) -> InlineKeyboardMarkup {
+    pub fn build_quality_keyboard(
+        info: &InfoResponse,
+        short_id: &str,
+        max_size_mb: f64,
+    ) -> InlineKeyboardMarkup {
         if info.is_playlist {
             let mut default_q = Quality::Video720p;
-            if info.available_qualities.iter().any(|q| q.quality.is_audio()) && 
-               !info.available_qualities.iter().any(|q| !q.quality.is_audio()) {
+            if info
+                .available_qualities
+                .iter()
+                .any(|q| q.quality.is_audio())
+                && !info
+                    .available_qualities
+                    .iter()
+                    .any(|q| !q.quality.is_audio())
+            {
                 default_q = Quality::AudioBest;
             }
             let btn = InlineKeyboardButton::callback(
@@ -108,7 +124,10 @@ impl UiBuilder {
         let mut audio_btns = Vec::new();
 
         for opt in &info.available_qualities {
-            let size_mb = opt.filesize_bytes.map(|b| b as f64 / (1024.0 * 1024.0)).unwrap_or(0.0);
+            let size_mb = opt
+                .filesize_bytes
+                .map(|b| b as f64 / (1024.0 * 1024.0))
+                .unwrap_or(0.0);
             let mut text = match opt.quality {
                 Quality::Video360p => "360p".to_string(),
                 Quality::Video480p => "480p".to_string(),
@@ -153,5 +172,7 @@ impl UiBuilder {
 }
 
 fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }

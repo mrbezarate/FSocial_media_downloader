@@ -26,17 +26,21 @@ pub async fn download(
 ) -> Result<YtDlpOutput, AppError> {
     let uuid = uuid::Uuid::new_v4().to_string();
     let mut cmd = Command::new(&config.ytdlp_path);
-    
+
     cmd.arg("--no-warnings")
-       .arg("-f").arg(quality.ytdlp_format())
-       .arg("-o").arg(format!("{}/{}.%(ext)s", output_dir, uuid))
-       .arg("--newline")
-       .arg("--write-info-json")
-       .arg("--no-playlist")
-       .arg("-N").arg("4") // 4 concurrent fragments to speed up downloads
-       .arg("--embed-thumbnail")
-       .arg("--embed-metadata")
-       .arg("--ffmpeg-location").arg(&config.ffmpeg_path);
+        .arg("-f")
+        .arg(quality.ytdlp_format())
+        .arg("-o")
+        .arg(format!("{}/{}.%(ext)s", output_dir, uuid))
+        .arg("--newline")
+        .arg("--write-info-json")
+        .arg("--no-playlist")
+        .arg("-N")
+        .arg("4") // 4 concurrent fragments to speed up downloads
+        .arg("--embed-thumbnail")
+        .arg("--embed-metadata")
+        .arg("--ffmpeg-location")
+        .arg(&config.ffmpeg_path);
 
     if quality.is_audio() {
         cmd.arg("--extract-audio").arg("--audio-format").arg("mp3");
@@ -47,7 +51,7 @@ pub async fn download(
     if let Some(p) = proxy {
         cmd.arg("--proxy").arg(p);
     }
-    
+
     if let Some(ref cookies) = config.cookies_path {
         cmd.arg("--cookies").arg(cookies);
     }
@@ -55,20 +59,22 @@ pub async fn download(
     cmd.arg(url);
 
     info!("Running yt-dlp command: {:?}", cmd);
-    let mut child = cmd.stdout(Stdio::piped())
-                       .stderr(Stdio::piped())
-                       .kill_on_drop(true)
-                       .spawn()?;
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()?;
 
     let stdout = child.stdout.take().unwrap();
     let mut reader = BufReader::new(stdout).lines();
-    
+
     let stderr_stream = child.stderr.take().unwrap();
     let mut stderr_reader = BufReader::new(stderr_stream).lines();
-    
+
     let error_log = std::sync::Arc::new(tokio::sync::Mutex::new(String::new()));
     let error_log_clone = error_log.clone();
-    
+
     tokio::spawn(async move {
         while let Ok(Some(line)) = stderr_reader.next_line().await {
             let mut lock = error_log_clone.lock().await;
@@ -84,7 +90,9 @@ pub async fn download(
             let trimmed = part.trim();
             if trimmed.starts_with("[download]") && trimmed.contains('%') {
                 if let Some(tx) = &progress_tx {
-                    let _ = tx.send(fsocial_common::ProgressEvent::Line(trimmed.to_string())).await;
+                    let _ = tx
+                        .send(fsocial_common::ProgressEvent::Line(trimmed.to_string()))
+                        .await;
                 }
             }
         }
@@ -96,32 +104,39 @@ pub async fn download(
         Ok(Err(e)) => return Err(AppError::Download(format!("Ошибка процесса yt-dlp: {}", e))),
         Err(_) => {
             let _ = child.kill().await;
-            return Err(AppError::Download("Процесс скачивания завис и был прерван (таймаут 1 час)".into()));
+            return Err(AppError::Download(
+                "Процесс скачивания завис и был прерван (таймаут 1 час)".into(),
+            ));
         }
     };
     if !status.success() {
         let stderr = error_log.lock().await.clone();
         error!("yt-dlp error: {}", stderr);
-        
+
         if stderr.contains("No video formats found") && url.contains("pin") {
             let client = reqwest::Client::new();
             if let Ok(resp) = client.get(url).send().await {
                 if let Ok(html) = resp.text().await {
                     let og_re = regex::Regex::new(r#"<meta(?:[^>]+)og:image(?:[^>]+)>"#).unwrap();
                     let content_re = regex::Regex::new(r#"content="([^"]+)""#).unwrap();
-                    
+
                     let mut img_url_opt = None;
                     if let Some(mat) = og_re.find(&html) {
                         let tag = mat.as_str();
                         if let Some(caps) = content_re.captures(tag) {
                             let url_str = caps.get(1).unwrap().as_str();
-                            img_url_opt = Some(url_str.replace("/736x/", "/originals/")
-                                .replace("/474x/", "/originals/")
-                                .replace("/236x/", "/originals/"));
+                            img_url_opt = Some(
+                                url_str
+                                    .replace("/736x/", "/originals/")
+                                    .replace("/474x/", "/originals/")
+                                    .replace("/236x/", "/originals/"),
+                            );
                         }
                     } else {
                         // Fallback to JSON schema "image":"..."
-                        let json_re = regex::Regex::new(r#""image":"(https://i\.pinimg\.com/[^"]+)""#).unwrap();
+                        let json_re =
+                            regex::Regex::new(r#""image":"(https://i\.pinimg\.com/[^"]+)""#)
+                                .unwrap();
                         if let Some(caps) = json_re.captures(&html) {
                             img_url_opt = Some(caps.get(1).unwrap().as_str().to_string());
                         }
@@ -130,7 +145,7 @@ pub async fn download(
                     if let Some(img_url) = img_url_opt {
                         let ext = img_url.split('.').last().unwrap_or("png");
                         let file_path = format!("{}/{}.{}", output_dir, uuid, ext);
-                        
+
                         if let Ok(img_resp) = client.get(&img_url).send().await {
                             if let Ok(bytes) = img_resp.bytes().await {
                                 if tokio::fs::write(&file_path, &bytes).await.is_ok() {
@@ -147,7 +162,9 @@ pub async fn download(
                     }
                 }
             }
-            return Err(AppError::Download("Не удалось извлечь фото с Pinterest. Возможно ссылка битая.".into()));
+            return Err(AppError::Download(
+                "Не удалось извлечь фото с Pinterest. Возможно ссылка битая.".into(),
+            ));
         }
 
         return Err(AppError::YtDlp {
@@ -157,7 +174,9 @@ pub async fn download(
     }
 
     let info_path = format!("{}/{}.info.json", output_dir, uuid);
-    let info_str = tokio::fs::read_to_string(&info_path).await.unwrap_or_default();
+    let info_str = tokio::fs::read_to_string(&info_path)
+        .await
+        .unwrap_or_default();
     let json: Value = serde_json::from_str(&info_str).unwrap_or(serde_json::json!({}));
     let _ = tokio::fs::remove_file(&info_path).await;
 
@@ -175,13 +194,26 @@ pub async fn download(
         return Err(AppError::Download("Could not find downloaded file".into()));
     }
 
-    let title = json.get("title").and_then(|v| v.as_str()).unwrap_or("Unknown").to_string();
-    let duration = json.get("duration").and_then(|v| v.as_f64()).map(|d| d as u64);
-    let mut thumbnail = json.get("thumbnail").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let title = json
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Unknown")
+        .to_string();
+    let duration = json
+        .get("duration")
+        .and_then(|v| v.as_f64())
+        .map(|d| d as u64);
+    let mut thumbnail = json
+        .get("thumbnail")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
     if thumbnail.is_none() {
         if let Some(thumbnails) = json.get("thumbnails").and_then(|v| v.as_array()) {
             if let Some(last) = thumbnails.last() {
-                thumbnail = last.get("url").and_then(|v| v.as_str()).map(|s| s.to_string());
+                thumbnail = last
+                    .get("url")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
             }
         }
     }
@@ -191,7 +223,8 @@ pub async fn download(
         }
         thumbnail = Some(t);
     }
-    let uploader = json.get("uploader")
+    let uploader = json
+        .get("uploader")
         .or_else(|| json.get("channel"))
         .or_else(|| json.get("uploader_id"))
         .or_else(|| json.get("artist"))
@@ -208,21 +241,25 @@ pub async fn download(
 }
 
 #[instrument(skip(config, proxy))]
-pub async fn get_info(config: &AppConfig, url: &str, proxy: Option<&str>) -> Result<fsocial_common::InfoResponse, AppError> {
+pub async fn get_info(
+    config: &AppConfig,
+    url: &str,
+    proxy: Option<&str>,
+) -> Result<fsocial_common::InfoResponse, AppError> {
     let mut cmd = Command::new(&config.ytdlp_path);
-    cmd.arg("--dump-json")
-       .arg("--flat-playlist");
-       
+    cmd.arg("--dump-json").arg("--flat-playlist");
+
     if let Some(p) = proxy {
         cmd.arg("--proxy").arg(p);
     }
-    
+
     if let Some(ref cookies) = config.cookies_path {
         cmd.arg("--cookies").arg(cookies);
     }
-    
+
     cmd.arg(url);
-    
+    cmd.stdin(Stdio::null());
+
     let output = tokio::time::timeout(std::time::Duration::from_secs(25), cmd.output())
         .await
         .map_err(|_| AppError::YtDlp {
@@ -232,9 +269,12 @@ pub async fn get_info(config: &AppConfig, url: &str, proxy: Option<&str>) -> Res
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        
+
         if stderr.contains("No video formats found") && url.contains("pin") {
-            return Err(AppError::Download("Скачивание фото с Pinterest пока не поддерживается, бот качает только видео!".into()));
+            return Err(AppError::Download(
+                "Скачивание фото с Pinterest пока не поддерживается, бот качает только видео!"
+                    .into(),
+            ));
         }
 
         return Err(AppError::YtDlp {
@@ -244,7 +284,7 @@ pub async fn get_info(config: &AppConfig, url: &str, proxy: Option<&str>) -> Res
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    
+
     let mut is_playlist = false;
     let mut playlist_count = None;
     let mut playlist_urls = Vec::new();
@@ -259,11 +299,15 @@ pub async fn get_info(config: &AppConfig, url: &str, proxy: Option<&str>) -> Res
     for line in stdout.lines() {
         if let Ok(json) = serde_json::from_str::<Value>(line) {
             if duration_secs.is_none() {
-                duration_secs = json.get("duration").and_then(|v| v.as_f64()).map(|d| d as u64);
+                duration_secs = json
+                    .get("duration")
+                    .and_then(|v| v.as_f64())
+                    .map(|d| d as u64);
             }
 
             if uploader.is_none() {
-                uploader = json.get("uploader")
+                uploader = json
+                    .get("uploader")
                     .or_else(|| json.get("channel"))
                     .or_else(|| json.get("uploader_id"))
                     .or_else(|| json.get("artist"))
@@ -272,11 +316,17 @@ pub async fn get_info(config: &AppConfig, url: &str, proxy: Option<&str>) -> Res
             }
 
             if thumbnail.is_none() {
-                thumbnail = json.get("thumbnail").and_then(|v| v.as_str()).map(|s| s.to_string());
+                thumbnail = json
+                    .get("thumbnail")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
                 if thumbnail.is_none() {
                     if let Some(thumbnails) = json.get("thumbnails").and_then(|v| v.as_array()) {
                         if let Some(last) = thumbnails.last() {
-                            thumbnail = last.get("url").and_then(|v| v.as_str()).map(|s| s.to_string());
+                            thumbnail = last
+                                .get("url")
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string());
                         }
                     }
                 }
@@ -300,7 +350,11 @@ pub async fn get_info(config: &AppConfig, url: &str, proxy: Option<&str>) -> Res
                         }
                     }
                     if title.is_empty() {
-                        title = json.get("title").and_then(|v| v.as_str()).unwrap_or("Playlist").to_string();
+                        title = json
+                            .get("title")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("Playlist")
+                            .to_string();
                     }
                     continue;
                 } else if t == "url" || t == "url_transparent" {
@@ -308,10 +362,18 @@ pub async fn get_info(config: &AppConfig, url: &str, proxy: Option<&str>) -> Res
                         playlist_urls.push(entry_url.to_string());
                     }
                     if title.is_empty() {
-                        title = json.get("playlist_title").or_else(|| json.get("playlist")).and_then(|v| v.as_str()).unwrap_or("Playlist").to_string();
+                        title = json
+                            .get("playlist_title")
+                            .or_else(|| json.get("playlist"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("Playlist")
+                            .to_string();
                     }
                     if playlist_count.is_none() {
-                        playlist_count = json.get("playlist_count").and_then(|v| v.as_u64()).map(|n| n as u32);
+                        playlist_count = json
+                            .get("playlist_count")
+                            .and_then(|v| v.as_u64())
+                            .map(|n| n as u32);
                     }
                     continue;
                 }
@@ -319,11 +381,21 @@ pub async fn get_info(config: &AppConfig, url: &str, proxy: Option<&str>) -> Res
 
             // It's a single video (or first video of playlist)
             if title.is_empty() {
-                title = json.get("title").and_then(|v| v.as_str()).unwrap_or("Unknown").to_string();
+                title = json
+                    .get("title")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Unknown")
+                    .to_string();
             }
 
-            if json.get("is_live").and_then(|v| v.as_bool()).unwrap_or(false) {
-                return Err(AppError::Download("Скачивание прямых трансляций (Live) не поддерживается".into()));
+            if json
+                .get("is_live")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+            {
+                return Err(AppError::Download(
+                    "Скачивание прямых трансляций (Live) не поддерживается".into(),
+                ));
             }
 
             // Parse formats
@@ -347,14 +419,26 @@ pub async fn get_info(config: &AppConfig, url: &str, proxy: Option<&str>) -> Res
                 if has_audio {
                     available_qualities.push(Quality::AudioBest);
                 }
-                
+
                 if !heights.is_empty() {
-                    if heights.iter().any(|&h| h >= 240 && h < 400) { available_qualities.push(Quality::Video360p); }
-                    if heights.iter().any(|&h| h >= 400 && h < 550) { available_qualities.push(Quality::Video480p); }
-                    if heights.iter().any(|&h| h >= 700 && h < 850) { available_qualities.push(Quality::Video720p); }
-                    if heights.iter().any(|&h| h >= 1000 && h < 1400) { available_qualities.push(Quality::Video1080p); }
-                    if heights.iter().any(|&h| h >= 1400 && h < 2000) { available_qualities.push(Quality::Video1440p); }
-                    if heights.iter().any(|&h| h >= 2000) { available_qualities.push(Quality::Video4K); }
+                    if heights.iter().any(|&h| h >= 240 && h < 400) {
+                        available_qualities.push(Quality::Video360p);
+                    }
+                    if heights.iter().any(|&h| h >= 400 && h < 550) {
+                        available_qualities.push(Quality::Video480p);
+                    }
+                    if heights.iter().any(|&h| h >= 700 && h < 850) {
+                        available_qualities.push(Quality::Video720p);
+                    }
+                    if heights.iter().any(|&h| h >= 1000 && h < 1400) {
+                        available_qualities.push(Quality::Video1080p);
+                    }
+                    if heights.iter().any(|&h| h >= 1400 && h < 2000) {
+                        available_qualities.push(Quality::Video1440p);
+                    }
+                    if heights.iter().any(|&h| h >= 2000) {
+                        available_qualities.push(Quality::Video4K);
+                    }
                 }
             }
         }
@@ -388,7 +472,11 @@ pub async fn get_info(config: &AppConfig, url: &str, proxy: Option<&str>) -> Res
                         let vcodec = f.get("vcodec").and_then(|v| v.as_str()).unwrap_or("none");
                         if vcodec != "none" && !vcodec.contains("mhtml") {
                             if f.get("height").and_then(|v| v.as_i64()) == Some(th) {
-                                if let Some(bytes) = f.get("filesize").and_then(|v| v.as_u64()).or_else(|| f.get("filesize_approx").and_then(|v| v.as_u64())) {
+                                if let Some(bytes) = f
+                                    .get("filesize")
+                                    .and_then(|v| v.as_u64())
+                                    .or_else(|| f.get("filesize_approx").and_then(|v| v.as_u64()))
+                                {
                                     max_bytes = max_bytes.max(bytes);
                                 }
                             }
@@ -457,7 +545,11 @@ pub async fn get_info(config: &AppConfig, url: &str, proxy: Option<&str>) -> Res
         duration_secs,
         available_qualities: quality_options,
         is_playlist: is_playlist || !playlist_urls.is_empty(),
-        playlist_count: if !playlist_urls.is_empty() { Some(playlist_urls.len() as u32) } else { playlist_count },
+        playlist_count: if !playlist_urls.is_empty() {
+            Some(playlist_urls.len() as u32)
+        } else {
+            playlist_count
+        },
         playlist_urls,
         error: None,
     })

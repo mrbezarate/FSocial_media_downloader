@@ -1,5 +1,6 @@
-use teloxide::types::{InputMediaAudio, InputFile};
+use teloxide::types::{InputFile, InputMediaAudio};
 
 fn main() {
-    let _ = InputMediaAudio::new(InputFile::file("foo.mp3")).thumbnail(InputFile::file("thumb.jpg"));
+    let _ =
+        InputMediaAudio::new(InputFile::file("foo.mp3")).thumbnail(InputFile::file("thumb.jpg"));
 }

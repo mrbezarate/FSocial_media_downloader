@@ -1,6 +1,6 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::RwLock;
-use std::time::{Instant, Duration};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 use tracing::{info, warn};
 
 pub struct ProxyEntry {
@@ -43,7 +43,7 @@ impl ProxyPool {
         for i in 0..len {
             let idx = (start + i) % len;
             let proxy = &self.proxies[idx];
-            
+
             let on_cooldown = {
                 if let Some(cooldown) = *proxy.cooldown_until.read().unwrap() {
                     cooldown > now
@@ -57,7 +57,7 @@ impl ProxyPool {
                 return Some(&proxy.url);
             }
         }
-        
+
         None
     }
 
@@ -65,12 +65,15 @@ impl ProxyPool {
         if let Some(proxy) = self.proxies.iter().find(|p| p.url == proxy_url) {
             let mut fails = proxy.failures.write().unwrap();
             *fails += 1;
-            
+
             let backoff_secs = 30 * (2_u64.pow((*fails - 1).min(6))); // max ~32 mins
             let cooldown = Instant::now() + Duration::from_secs(backoff_secs);
-            
+
             *proxy.cooldown_until.write().unwrap() = Some(cooldown);
-            warn!("Proxy {} marked as failed (fail count: {}). Cooldown for {}s", proxy_url, *fails, backoff_secs);
+            warn!(
+                "Proxy {} marked as failed (fail count: {}). Cooldown for {}s",
+                proxy_url, *fails, backoff_secs
+            );
         }
     }
 
