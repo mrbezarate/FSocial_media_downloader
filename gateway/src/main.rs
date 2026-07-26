@@ -115,6 +115,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             dptree::filter(|msg: Message| msg.successful_payment().is_some())
                 .endpoint(handlers::payments::handle_successful_payment),
         )
+        // Add state filter here: only fall through if state handle returns Ok(()) (meaning no state or state ignored)
+        .branch(dptree::filter_async(|msg: Message, pool: deadpool_redis::Pool| async move {
+            let uid = msg.from.as_ref().map(|u| u.id.0).unwrap_or(0);
+            if uid == 0 { return false; }
+            if let Ok(mut conn) = pool.get().await {
+                let key = format!("admin_state:{}", uid);
+                let state: Option<String> = redis::cmd("GET").arg(&key).query_async(&mut conn).await.unwrap_or(None);
+                return state.is_some() && !state.as_ref().unwrap().is_empty();
+            }
+            false
+        }).endpoint(handlers::state::handle))
         .branch(dptree::filter(url_parser::contains_url).endpoint(handlers::download::handle));
 
     let callback_handler = Update::filter_callback_query().endpoint(handlers::callback::handle);
@@ -143,6 +154,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let commands = vec![
         teloxide::types::BotCommand::new("start", "🚀 Запустить бота / Помощь"),
         teloxide::types::BotCommand::new("settings", "⚙️ Настройки качества и звука"),
+        teloxide::types::BotCommand::new("promo", "🎟 Ввести промокод"),
+        teloxide::types::BotCommand::new("admin", "🛠 Панель администратора"),
         teloxide::types::BotCommand::new("help", "❓ Как пользоваться ботом"),
     ];
     if let Err(e) = bot.set_my_commands(commands).await {

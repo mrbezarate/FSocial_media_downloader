@@ -264,16 +264,42 @@ pub async fn handle(
                             let _ = bot.edit_message_text(msg.chat().id, msg.id(), text).parse_mode(teloxide::types::ParseMode::Html).await;
                         }
                         "promo" => {
-                            let text = "🎟 <b>Управление промокодами</b>\n\nЧтобы создать промокод, отправьте:\n<code>/admin promo_create &lt;код&gt; &lt;дни&gt; &lt;использования&gt;</code>\n\nПользователи могут активировать их командой <code>/promo &lt;код&gt;</code>";
-                            let _ = bot.edit_message_text(msg.chat().id, msg.id(), text).parse_mode(teloxide::types::ParseMode::Html).await;
+                            if let Ok(mut conn) = redis_pool.get().await {
+                                let _: redis::RedisResult<()> = redis::cmd("SET").arg(format!("admin_state:{}", msg.chat().id.0)).arg("waiting_promo_create").query_async(&mut conn).await;
+                                let text = "🎟 <b>Создание промокода</b>\n\nОтправьте параметры через пробел:\n<code>КОД ДНИ ИСПОЛЬЗОВАНИЯ</code>\n\nПример: <code>VIP2024 30 100</code>\n\nДля отмены введите /cancel";
+                                let _ = bot.edit_message_text(msg.chat().id, msg.id(), text).parse_mode(teloxide::types::ParseMode::Html).await;
+                            }
                         }
                         "admins_menu" => {
-                            let text = "👑 <b>Управление администраторами</b>\n\nНазначить админа:\n<code>/admin add &lt;user_id&gt;</code>\n\nСнять админа:\n<code>/admin remove &lt;user_id&gt;</code>";
-                            let _ = bot.edit_message_text(msg.chat().id, msg.id(), text).parse_mode(teloxide::types::ParseMode::Html).await;
+                            let text = "👑 <b>Управление администраторами</b>\n\nВыберите действие:";
+                            let keyboard = teloxide::types::InlineKeyboardMarkup::new(vec![
+                                vec![
+                                    teloxide::types::InlineKeyboardButton::callback("➕ Добавить админа", "admin|add_admin"),
+                                    teloxide::types::InlineKeyboardButton::callback("➖ Удалить админа", "admin|remove_admin"),
+                                ],
+                            ]);
+                            let _ = bot.edit_message_text(msg.chat().id, msg.id(), text).reply_markup(keyboard).parse_mode(teloxide::types::ParseMode::Html).await;
+                        }
+                        "add_admin" => {
+                            if let Ok(mut conn) = redis_pool.get().await {
+                                let _: redis::RedisResult<()> = redis::cmd("SET").arg(format!("admin_state:{}", msg.chat().id.0)).arg("waiting_admin_add").query_async(&mut conn).await;
+                                let text = "Отправьте <b>Telegram ID</b> пользователя, которого хотите назначить администратором:\n\nДля отмены введите /cancel";
+                                let _ = bot.edit_message_text(msg.chat().id, msg.id(), text).parse_mode(teloxide::types::ParseMode::Html).await;
+                            }
+                        }
+                        "remove_admin" => {
+                            if let Ok(mut conn) = redis_pool.get().await {
+                                let _: redis::RedisResult<()> = redis::cmd("SET").arg(format!("admin_state:{}", msg.chat().id.0)).arg("waiting_admin_remove").query_async(&mut conn).await;
+                                let text = "Отправьте <b>Telegram ID</b> пользователя, у которого хотите забрать права администратора:\n\nДля отмены введите /cancel";
+                                let _ = bot.edit_message_text(msg.chat().id, msg.id(), text).parse_mode(teloxide::types::ParseMode::Html).await;
+                            }
                         }
                         "reklama" => {
-                            let text = "📢 <b>Массовая рассылка</b>\n\nЧтобы отправить сообщение всем пользователям, используйте команду:\n<code>/admin broadcast &lt;ваш текст...&gt;</code>";
-                            let _ = bot.edit_message_text(msg.chat().id, msg.id(), text).parse_mode(teloxide::types::ParseMode::Html).await;
+                            if let Ok(mut conn) = redis_pool.get().await {
+                                let _: redis::RedisResult<()> = redis::cmd("SET").arg(format!("admin_state:{}", msg.chat().id.0)).arg("waiting_broadcast").query_async(&mut conn).await;
+                                let text = "📢 <b>Массовая рассылка</b>\n\nОтправьте текст, который хотите разослать <b>всем</b> пользователям бота:\n\nДля отмены введите /cancel";
+                                let _ = bot.edit_message_text(msg.chat().id, msg.id(), text).parse_mode(teloxide::types::ParseMode::Html).await;
+                            }
                         }
                         _ => {}
                     }
