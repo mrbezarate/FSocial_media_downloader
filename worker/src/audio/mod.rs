@@ -48,6 +48,7 @@ pub async fn process_spotify_task(
                     &ctx.config.shared_data_path,
                     proxy,
                     progress_tx.clone(),
+                    task.is_premium,
                 )
                 .await
                 {

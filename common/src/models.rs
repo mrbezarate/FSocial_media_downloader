@@ -259,6 +259,7 @@ impl DownloadTask {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskResult {
     pub task_id: String,
+    pub user_id: u64,
     pub chat_id: i64,
     pub status_message_id: Option<i32>,
     #[serde(default)]

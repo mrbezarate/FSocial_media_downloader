@@ -383,6 +383,38 @@ pub async fn handle(
                                 .map(|until| until > now)
                                 .unwrap_or(false);
 
+                            // Check active tasks concurrency limit
+                            let max_concurrent = if is_premium { 3 } else { 1 };
+                            if let Ok(mut conn) = redis_pool.get().await {
+                                let active_key = format!("active_tasks:{}", user_id);
+                                let current_active: u32 = redis::cmd("GET")
+                                    .arg(&active_key)
+                                    .query_async(&mut conn)
+                                    .await
+                                    .unwrap_or(0);
+
+                                if current_active >= max_concurrent {
+                                    let err_msg = if is_premium {
+                                        "❌ Достигнут лимит одновременных загрузок (3)."
+                                    } else {
+                                        "❌ У вас уже есть активная загрузка. Дождитесь её завершения или оформите Premium 💎 для 3 одновременных загрузок."
+                                    };
+                                    let _ = bot.send_message(chat, err_msg).await;
+                                    return Ok(());
+                                }
+
+                                // Increment and set expiry to 2 hours just in case a worker crashes
+                                let _: () = redis::pipe()
+                                    .cmd("INCR")
+                                    .arg(&active_key)
+                                    .cmd("EXPIRE")
+                                    .arg(&active_key)
+                                    .arg(7200)
+                                    .query_async(&mut conn)
+                                    .await
+                                    .unwrap_or(());
+                            }
+
                             // Check limits if not premium
                             if !is_premium {
                                 if let Ok(mut conn) = redis_pool.get().await {
@@ -403,6 +435,7 @@ pub async fn handle(
                                     if dls >= 200 || bytes >= 2147483648 {
                                         let err_msg = "Сегодня лимит бесплатных загрузок исчерпан. Он обновится через 24 часа или можно оформить Premium 💎.";
                                         let _ = bot.send_message(chat, err_msg).await;
+                                        let _: () = redis::cmd("DECR").arg(&format!("active_tasks:{}", user_id)).query_async(&mut conn).await.unwrap_or(());
                                         return Ok(());
                                     }
                                 }
@@ -416,6 +449,9 @@ pub async fn handle(
                                 if info.is_playlist && !info.playlist_urls.is_empty() {
                                     if info.playlist_urls.len() > 50 && !is_premium {
                                         let _ = bot.send_message(chat, "❌ Бесплатные пользователи могут скачивать плейлисты только до 50 треков. Оформите Premium 💎 для снятия ограничений.").await;
+                                        if let Ok(mut conn) = redis_pool.get().await {
+                                            let _: () = redis::cmd("DECR").arg(&format!("active_tasks:{}", user_id)).query_async(&mut conn).await.unwrap_or(());
+                                        }
                                         return Ok(());
                                     }
                                     let mut task = DownloadTask::new(
@@ -547,6 +583,9 @@ pub async fn handle(
                                 };
 
                                 if send_res.is_ok() {
+                                    if let Ok(mut conn) = redis_pool.get().await {
+                                        let _: () = redis::cmd("DECR").arg(&format!("active_tasks:{}", user_id)).query_async(&mut conn).await.unwrap_or(());
+                                    }
                                     return Ok(());
                                 }
                             }
@@ -565,6 +604,9 @@ pub async fn handle(
                                         .edit_message_caption(msg.chat().id, msg.id())
                                         .caption("❌ Внутренняя ошибка")
                                         .await;
+                                }
+                                if let Ok(mut conn) = redis_pool.get().await {
+                                    let _: () = redis::cmd("DECR").arg(&format!("active_tasks:{}", user_id)).query_async(&mut conn).await.unwrap_or(());
                                 }
                             }
                         }

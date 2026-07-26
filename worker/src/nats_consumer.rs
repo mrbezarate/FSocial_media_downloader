@@ -38,6 +38,7 @@ pub async fn publish_progress(
 ) {
     let res = TaskResult {
         task_id: task_id.to_string(),
+        user_id: 0,
         chat_id,
         status_message_id,
         status_is_media: false,
@@ -71,6 +72,7 @@ pub async fn publish_playlist_progress(
 ) {
     let res = TaskResult {
         task_id: task_id.to_string(),
+        user_id: 0,
         chat_id,
         status_message_id,
         status_is_media: false,
@@ -630,6 +632,7 @@ pub async fn run(
                     ));
                     let res = TaskResult {
                         task_id: task.task_id.clone(),
+                        user_id: task.user_id,
                         chat_id: task.chat_id,
                         status_message_id: task.status_message_id,
                         status_is_media: task.status_is_media,
@@ -652,6 +655,7 @@ pub async fn run(
                     let completed_files_len = completed_files.len();
                     let res = TaskResult {
                         task_id: task.task_id.clone(),
+                        user_id: task.user_id,
                         chat_id: task.chat_id,
                         status_message_id: task.status_message_id,
                         status_is_media: task.status_is_media,
@@ -671,6 +675,7 @@ pub async fn run(
                 if let Some(e) = first_error {
                     let res = TaskResult {
                         task_id: task.task_id.clone(),
+                        user_id: task.user_id,
                         chat_id: task.chat_id,
                         status_message_id: task.status_message_id,
                         status_is_media: task.status_is_media,
@@ -701,6 +706,7 @@ pub async fn run(
                     ) = completed_files.remove(0);
                     let res = TaskResult {
                         task_id: task.task_id.clone(),
+                        user_id: task.user_id,
                         chat_id: task.chat_id,
                         status_message_id: task.status_message_id,
                         status_is_media: task.status_is_media,

@@ -50,6 +50,24 @@ async fn handle_result(
 ) {
     let chat_id = teloxide::types::ChatId(res.chat_id);
 
+    // DECR active tasks if the status is terminal
+    let is_terminal = match &res.status {
+        TaskStatus::Completed { .. } => true,
+        TaskStatus::PlaylistCompleted { .. } => true,
+        TaskStatus::Failed { retryable, .. } => !retryable,
+        _ => false,
+    };
+
+    if is_terminal {
+        if let Ok(mut conn) = redis_pool.get().await {
+            let _: () = redis::cmd("DECR")
+                .arg(&format!("active_tasks:{}", res.user_id))
+                .query_async(&mut conn)
+                .await
+                .unwrap_or(());
+        }
+    }
+
     match res.status {
         TaskStatus::Completed {
             file_path,

@@ -32,6 +32,7 @@ pub async fn process_media_task(
             &ctx.config.shared_data_path,
             proxy,
             tx_clone,
+            task.is_premium,
         )
         .await
         {

@@ -23,6 +23,7 @@ pub async fn download(
     output_dir: &str,
     proxy: Option<&str>,
     progress_tx: Option<tokio::sync::mpsc::Sender<fsocial_common::ProgressEvent>>,
+    is_premium: bool,
 ) -> Result<YtDlpOutput, AppError> {
     let uuid = uuid::Uuid::new_v4().to_string();
     let mut cmd = Command::new(&config.ytdlp_path);
@@ -54,6 +55,10 @@ pub async fn download(
 
     if let Some(ref cookies) = config.cookies_path {
         cmd.arg("--cookies").arg(cookies);
+    }
+
+    if !is_premium {
+        cmd.arg("--limit-rate").arg("3M");
     }
 
     cmd.arg(url);
