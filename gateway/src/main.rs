@@ -165,21 +165,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::warn!("Failed to set bot commands: {}", e);
     }
 
-    if let Ok(mut conn) = redis_pool.get().await {
-        let admins: Vec<u64> = redis::cmd("SMEMBERS").arg("admins:set").query_async(&mut conn).await.unwrap_or_default();
-        let mut admin_commands = commands.clone();
-        admin_commands.push(teloxide::types::BotCommand::new("admin", "🛠 Панель администратора"));
-        admin_commands.push(teloxide::types::BotCommand::new("log", "📜 Логи системы"));
-
-        for admin_id in admins {
-            let _ = bot.set_my_commands(admin_commands.clone())
-                .scope(teloxide::types::BotCommandScope::Chat {
-                    chat_id: teloxide::types::Recipient::Id(teloxide::types::ChatId(admin_id as i64))
-                })
-                .await;
-        }
-    }
-
     info!("Gateway is running!");
     dispatcher.dispatch().await;
 
