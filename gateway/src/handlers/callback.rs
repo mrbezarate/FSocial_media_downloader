@@ -14,6 +14,10 @@ pub async fn handle(
     redis_pool: deadpool_redis::Pool,
 ) -> ResponseResult<()> {
     tracing::info!("Received callback query with data: {:?}", q.data);
+
+    // IMMEDIATELY answer the callback query to stop the loading animation on the button
+    let _ = bot.answer_callback_query(q.id.clone()).await;
+
     if let Some(data) = &q.data {
         let parts: Vec<&str> = data.splitn(2, '|').collect();
 
@@ -32,7 +36,6 @@ pub async fn handle(
                     .parse_mode(teloxide::types::ParseMode::Html)
                     .await;
             }
-            let _ = bot.answer_callback_query(q.id).await;
             return Ok(());
         }
 
@@ -69,7 +72,6 @@ pub async fn handle(
                     .send_invoice(msg.chat().id, title, description, payload, "XTR", prices)
                     .await;
             }
-            let _ = bot.answer_callback_query(q.id).await;
             return Ok(());
         }
 
@@ -195,7 +197,6 @@ pub async fn handle(
                     }
                 }
             }
-            bot.answer_callback_query(q.id).await?;
             return Ok(());
         }
 
@@ -269,7 +270,6 @@ pub async fn handle(
                             .await;
                     }
                 }
-                bot.answer_callback_query(q.id).await?;
                 return Ok(());
             }
 
@@ -340,7 +340,6 @@ pub async fn handle(
                         _ => {}
                     }
                 }
-                bot.answer_callback_query(q.id).await?;
                 return Ok(());
             }
 
@@ -353,7 +352,6 @@ pub async fn handle(
             if let Some(quality) = Quality::from_callback(quality_str) {
                 if let Some(url_str) = original_url {
                     if let Some(url_match) = url_parser::detect(&url_str) {
-                        bot.answer_callback_query(q.id.clone()).await?;
 
                         if let Some(msg) = q.message {
                             // we moved edit_message_text down after task generation
@@ -616,10 +614,6 @@ pub async fn handle(
             }
         }
     }
-
-    bot.answer_callback_query(q.id)
-        .text("❌ Ошибка обработки запроса")
-        .await?;
 
     Ok(())
 }
