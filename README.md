@@ -25,6 +25,7 @@
 ## ✨ Ключевые фичи
 
 - **Индивидуальные настройки**: Профили пользователей хранятся в Redis. Команда `/settings` позволяет настроить дефолтное качество для авто-скачивания и включить "Тихий режим".
+- **Premium Подписка (Telegram Stars)**: Встроенная монетизация и разделение на `free` и `premium` очереди воркеров. Премиум-пользователи получают максимальный приоритет и отсутствие лимитов на плейлисты.
 - **Inline-режим (@бот url)**: Мгновенный шеринг контента. Введите имя бота и ссылку в любом чате, чтобы моментально получить файл из кэша.
 - **Smart Fallback & Лимиты**: Умная система понижения качества. Если видео не влезает в лимит Telegram (50 МБ для облака или 1 ГБ для локального сервера), бот *автоматически* скачает версию полегче без ошибок и сбоев!
 - **Файлы до 1 ГБ**: Поддержка огромных файлов через Local Telegram Bot API Server!
@@ -55,16 +56,16 @@ graph TD
     Gateway -->|Publish DownloadTask| NATS{NATS JetStream\nBroker}
     NATS -->|TaskStatus & Progress| Gateway
     
-    NATS -->|Queue Group / Pull| W1(Worker 1)
-    NATS -->|Queue Group / Pull| W2(Worker 2)
-    NATS -->|Queue Group / Pull| WN(Worker N)
+    NATS -->|Free Queue| WF1(Free Worker 1)
+    NATS -->|Free Queue| WFN(Free Worker N)
+    NATS -->|Premium Queue| WP1(Premium Worker 1)
     
-    W1 -.->|Zero Copy write| SharedVol[(Shared Docker Volume\n/shared_data)]
-    W2 -.->|Zero Copy write| SharedVol
-    WN -.->|Zero Copy write| SharedVol
+    WF1 -.->|Zero Copy write| SharedVol[(Shared Docker Volume\n/shared_data)]
+    WFN -.->|Zero Copy write| SharedVol
+    WP1 -.->|Zero Copy write| SharedVol
     SharedVol -.->|Zero Copy read| TG
     
-    W1 <--> Redis[(Redis Cache)]
+    WF1 <--> Redis[(Redis Cache)]
     Gateway <--> PG[(PostgreSQL\nProfiles)]
 ```
 
@@ -102,11 +103,11 @@ POSTGRES_PASSWORD=secure_database_password
 
 ### 2. Запуск инфраструктуры
 ```bash
-# Запуск Gateway, 1x Worker, NATS, Redis, Postgres, Bot API Server
+# Запуск Gateway, 1x Free Worker, 1x Premium Worker, NATS, Redis, Postgres, Bot API Server
 docker compose up -d --build
 
-# Если нагрузка растёт, мгновенно добавляем воркеры!
-docker compose up -d --scale worker=4
+# Мгновенное масштабирование для разных тиров пользователей!
+docker compose up -d --scale worker=4 --scale pre-worker=2
 ```
 
 ### 3. Наблюдение за полётом
@@ -138,6 +139,8 @@ PROXY_LIST=socks5://user:pass@1.1.1.1:1080,socks5://user:pass@2.2.2.2:1080
 ## 📜 Команды
 - `/start` — 🚀 Запустить бота / Помощь
 - `/settings` — ⚙️ Настройки качества и звука (Ваши текущие настройки и статистика профиля)
+- `/premium` — 💎 Купить подписку Premium за Telegram Stars
+- `/admin` — 👑 Админ-команды (например, выдача премиума: `/admin give_premium <user_id> <days>`)
 - `/help` — ❓ Как пользоваться ботом
 
 ---
