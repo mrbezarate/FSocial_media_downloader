@@ -155,7 +155,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         teloxide::types::BotCommand::new("start", "🚀 Запустить бота / Помощь"),
         teloxide::types::BotCommand::new("settings", "⚙️ Настройки качества и звука"),
         teloxide::types::BotCommand::new("promo", "🎟 Ввести промокод"),
-        teloxide::types::BotCommand::new("admin", "🛠 Панель администратора"),
         teloxide::types::BotCommand::new("help", "❓ Как пользоваться ботом"),
     ];
     if let Err(e) = bot.set_my_commands(commands).await {

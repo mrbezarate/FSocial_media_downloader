@@ -116,6 +116,7 @@ pub async fn handle(
                 vec![teloxide::types::InlineKeyboardButton::callback("1 День (20 ⭐)", "invoice|day")],
                 vec![teloxide::types::InlineKeyboardButton::callback("1 Месяц (500 ⭐)", "invoice|month")],
                 vec![teloxide::types::InlineKeyboardButton::callback("1 Год (4800 ⭐)", "invoice|year")],
+                vec![teloxide::types::InlineKeyboardButton::callback("🔙 Назад", "settings_main")],
             ]);
             bot.send_message(msg.chat.id, text)
                 .reply_markup(keyboard)
