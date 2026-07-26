@@ -18,9 +18,9 @@ pub async fn handle(
         let parts: Vec<&str> = data.splitn(2, '|').collect();
 
         if parts[0] == "buy_premium" {
-            let text = "💎 <b>Premium Подписка</b>\n\nВыберите период подписки:\n\n• <b>1 День</b> - 50 ⭐ (попробовать!)\n• <b>1 Месяц</b> - 500 ⭐\n• <b>1 Год</b> - 4800 ⭐ (Выгода 20%!)";
+            let text = "💎 <b>Premium Подписка</b>\n\nВыберите период подписки:\n\n• <b>1 День</b> - 20 ⭐ (попробовать!)\n• <b>1 Месяц</b> - 500 ⭐\n• <b>1 Год</b> - 4800 ⭐ (Выгода 20%!)";
             let keyboard = teloxide::types::InlineKeyboardMarkup::new(vec![
-                vec![teloxide::types::InlineKeyboardButton::callback("1 День (50 ⭐)", "invoice|day")],
+                vec![teloxide::types::InlineKeyboardButton::callback("1 День (20 ⭐)", "invoice|day")],
                 vec![teloxide::types::InlineKeyboardButton::callback("1 Месяц (500 ⭐)", "invoice|month")],
                 vec![teloxide::types::InlineKeyboardButton::callback("1 Год (4800 ⭐)", "invoice|year")],
             ]);
@@ -38,7 +38,7 @@ pub async fn handle(
         if parts[0] == "invoice" && parts.len() == 2 {
             let period = parts[1];
             let (title, description, payload, amount) = match period {
-                "day" => ("Premium на 1 день", "Один день полного доступа.", "premium_1_day", 50),
+                "day" => ("Premium на 1 день", "Один день полного доступа.", "premium_1_day", 20),
                 "month" => ("Premium на 1 месяц", "Месяц безграничных загрузок.", "premium_1_month", 500),
                 "year" => ("Premium на 1 Год", "Год безграничных загрузок со скидкой 20%.", "premium_1_year", 4800),
                 _ => return Ok(()),
