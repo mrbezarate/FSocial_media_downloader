@@ -78,10 +78,14 @@ pub async fn download(
     });
 
     while let Ok(Some(line)) = reader.next_line().await {
-        let trimmed = line.trim_start_matches('\r').trim_start();
-        if trimmed.starts_with("[download]") && trimmed.contains("%") {
-            if let Some(tx) = &progress_tx {
-                let _ = tx.send(fsocial_common::ProgressEvent::Line(trimmed.to_string())).await;
+        // yt-dlp with -N (multi-thread) may output multiple progress updates
+        // joined by \r in a single line. Split to catch each one.
+        for part in line.split('\r') {
+            let trimmed = part.trim();
+            if trimmed.starts_with("[download]") && trimmed.contains('%') {
+                if let Some(tx) = &progress_tx {
+                    let _ = tx.send(fsocial_common::ProgressEvent::Line(trimmed.to_string())).await;
+                }
             }
         }
     }

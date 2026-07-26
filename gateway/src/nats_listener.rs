@@ -384,8 +384,10 @@ async fn handle_result(bot: &crate::MyBot, res: TaskResult, config: &AppConfig, 
 }
 
 async fn handle_progress(bot: &crate::MyBot, res: TaskResult, task_states: &crate::TaskStates) {
-    let is_paused = task_states.get(&res.task_id).await == Some("paused".to_string());
-    if is_paused { return; }
+    let state = task_states.get(&res.task_id).await;
+    let is_paused = state.as_deref() == Some("paused");
+    let is_aborted = state.as_deref() == Some("aborted");
+    if is_paused || is_aborted { return; }
 
     match res.status {
         TaskStatus::Progress { percent: _, status_text } => {
