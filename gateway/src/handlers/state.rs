@@ -45,7 +45,7 @@ pub async fn handle(
             for key in &keys {
                 if let Some(uid_str) = key.strip_prefix("user_settings:") {
                     if let Ok(uid) = uid_str.parse::<i64>() {
-                        if bot.send_message(teloxide::types::ChatId(uid), text).await.is_ok() {
+                        if bot.copy_message(teloxide::types::ChatId(uid), msg.chat.id, msg.id).await.is_ok() {
                             success += 1;
                         }
                     }
@@ -72,23 +72,34 @@ pub async fn handle(
             }
             let _: redis::RedisResult<()> = redis::cmd("DEL").arg(format!("admin_state:{}", user_id)).query_async(&mut conn).await;
         } else if state == "waiting_promo_create" {
-            // expected format: CODE DAYS USES
+            // expected format: CODE TYPE VALUE USES
             let parts: Vec<&str> = text.split_whitespace().collect();
-            if parts.len() == 3 {
+            if parts.len() == 4 {
                 let code = parts[0];
-                if let (Ok(days), Ok(uses)) = (parts[1].parse::<i64>(), parts[2].parse::<i64>()) {
-                    let promo_data = serde_json::json!({
-                        "days": days,
-                        "max_uses": uses,
-                        "uses": 0
-                    });
+                let promo_type = parts[1];
+                if let (Ok(value), Ok(uses)) = (parts[2].parse::<i64>(), parts[3].parse::<i64>()) {
+                    let promo_data = if promo_type == "discount" {
+                        serde_json::json!({
+                            "type": "discount",
+                            "discount_percent": value,
+                            "max_uses": uses,
+                            "uses": 0
+                        })
+                    } else {
+                        serde_json::json!({
+                            "type": "days",
+                            "days": value,
+                            "max_uses": uses,
+                            "uses": 0
+                        })
+                    };
                     let _: redis::RedisResult<()> = redis::cmd("HSET").arg("promocodes").arg(code).arg(promo_data.to_string()).query_async(&mut conn).await;
-                    bot.send_message(msg.chat.id, format!("✅ Промокод <code>{}</code> создан!\nДней: {}\nМакс. использований: {}", code, days, uses)).parse_mode(teloxide::types::ParseMode::Html).await?;
+                    bot.send_message(msg.chat.id, format!("✅ Промокод <code>{}</code> создан!\nТип: {}\nЗначение: {}\nМакс. использований: {}", code, promo_type, value, uses)).parse_mode(teloxide::types::ParseMode::Html).await?;
                     let _: redis::RedisResult<()> = redis::cmd("DEL").arg(format!("admin_state:{}", user_id)).query_async(&mut conn).await;
                     return Ok(());
                 }
             }
-            bot.send_message(msg.chat.id, "Неверный формат. Ожидается: КОД ДНИ ИСПОЛЬЗОВАНИЯ\nПример: VIP 30 100\nИли нажмите /cancel").await?;
+            bot.send_message(msg.chat.id, "Неверный формат.\nОжидается: КОД ТИП ЗНАЧЕНИЕ ИСПОЛЬЗОВАНИЯ\nПримеры:\nVIP2024 days 30 100\nSALE50 discount 50 100\n\nИли нажмите /cancel").await?;
             return Ok(());
         }
     }

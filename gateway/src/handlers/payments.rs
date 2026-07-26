@@ -18,7 +18,12 @@ pub async fn handle_successful_payment(
 ) -> ResponseResult<()> {
     if let Some(payment) = msg.successful_payment() {
         let user_id = msg.from.as_ref().map(|u| u.id.0).unwrap_or(0);
-        let days = if payment.total_amount == 500 { 30 } else { 30 }; // default 1 month
+        let days = match payment.invoice_payload.as_str() {
+            "premium_1_day" => 1,
+            "premium_1_month" => 30,
+            "premium_1_year" => 365,
+            _ => 30,
+        };
 
         if user_id > 0 {
             if let Ok(mut conn) = redis_pool.get().await {

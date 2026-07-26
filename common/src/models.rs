@@ -7,6 +7,8 @@ pub struct UserSettings {
     pub default_audio: Quality,
     pub auto_download: bool,
     pub premium_until: Option<i64>,
+    #[serde(default)]
+    pub active_discount_percent: u8,
 }
 
 impl Default for UserSettings {
@@ -16,6 +18,7 @@ impl Default for UserSettings {
             default_audio: Quality::AudioBest,
             auto_download: false,
             premium_until: None,
+            active_discount_percent: 0,
         }
     }
 }

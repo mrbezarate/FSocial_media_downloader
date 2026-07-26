@@ -311,7 +311,7 @@ pub async fn handle(
                             return Ok(());
                         }
 
-                        // Apply premium
+                        // Apply promo
                         let key = format!("user_settings:{}", user_id);
                         let mut settings = fsocial_common::UserSettings::default();
                         let res: redis::RedisResult<String> = redis::cmd("GET").arg(&key).query_async(&mut conn).await;
@@ -321,9 +321,19 @@ pub async fn handle(
                             }
                         }
 
-                        let now = chrono::Utc::now().timestamp();
-                        let current_until = settings.premium_until.unwrap_or(now).max(now);
-                        settings.premium_until = Some(current_until + days * 86400);
+                        let promo_type = promo_data["type"].as_str().unwrap_or("days");
+                        let mut response_msg = String::new();
+
+                        if promo_type == "discount" {
+                            let discount_percent = promo_data["discount_percent"].as_i64().unwrap_or(0);
+                            settings.active_discount_percent = discount_percent as u8;
+                            response_msg = format!("🎉 Промокод успешно активирован! Ваша скидка {}% применена к будущим покупкам.", discount_percent);
+                        } else {
+                            let now = chrono::Utc::now().timestamp();
+                            let current_until = settings.premium_until.unwrap_or(now).max(now);
+                            settings.premium_until = Some(current_until + days * 86400);
+                            response_msg = format!("🎉 Промокод успешно активирован! Вы получили Premium на {} дней.", days);
+                        }
 
                         if let Ok(json) = serde_json::to_string(&settings) {
                             let _: redis::RedisResult<()> = redis::cmd("SET").arg(&key).arg(json).query_async(&mut conn).await;
@@ -335,7 +345,7 @@ pub async fn handle(
                             promo_data["uses"] = serde_json::json!(uses + 1);
                             let _: redis::RedisResult<()> = redis::cmd("HSET").arg("promocodes").arg(code).arg(promo_data.to_string()).query_async(&mut conn).await;
 
-                            bot.send_message(msg.chat.id, format!("🎉 Промокод успешно активирован! Вы получили Premium на {} дней.", days)).await?;
+                            bot.send_message(msg.chat.id, response_msg).await?;
                             return Ok(());
                         }
                     }
