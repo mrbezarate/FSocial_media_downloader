@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+mod admin_logs;
 mod commands;
 mod handlers;
 mod nats_client;
@@ -25,8 +26,17 @@ use nats_client::NatsClient;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = dotenv();
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+
+    let env_filter = EnvFilter::from_default_env();
+    let fmt_layer = tracing_subscriber::fmt::layer();
+    let memory_layer = admin_logs::MemoryLogLayer;
+
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(fmt_layer)
+        .with(memory_layer)
         .init();
 
     info!("Starting Gateway service...");

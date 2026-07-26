@@ -237,6 +237,51 @@ pub async fn handle(
                 return Ok(());
             }
 
+            if action == "admin" {
+                if let Some(msg) = q.message {
+                    match target {
+                        "stats" => {
+                            if let Ok(mut conn) = redis_pool.get().await {
+                                let keys: Vec<String> = redis::cmd("KEYS").arg("user_settings:*").query_async(&mut conn).await.unwrap_or_default();
+                                let downloads: i64 = redis::cmd("GET").arg("total_downloads_global").query_async(&mut conn).await.unwrap_or(0);
+                                let text = format!("📊 <b>Статистика системы:</b>\n\n👥 Всего пользователей: {}\n💾 Всего загрузок: {}", keys.len(), downloads);
+                                let _ = bot.edit_message_text(msg.chat().id, msg.id(), text).parse_mode(teloxide::types::ParseMode::Html).await;
+                            }
+                        }
+                        "logs" => {
+                            let mut logs_text = String::new();
+                            if let Ok(buf) = crate::admin_logs::LOG_BUFFER.read() {
+                                let last_20 = buf.iter().rev().take(20).collect::<Vec<_>>();
+                                for log in last_20.iter().rev() {
+                                    logs_text.push_str(log);
+                                    logs_text.push('\n');
+                                }
+                            }
+                            if logs_text.is_empty() {
+                                logs_text = "Логи пусты.".to_string();
+                            }
+                            let text = format!("📜 <b>Последние логи (20 строк):</b>\n\n<pre>{}</pre>", logs_text);
+                            let _ = bot.edit_message_text(msg.chat().id, msg.id(), text).parse_mode(teloxide::types::ParseMode::Html).await;
+                        }
+                        "promo" => {
+                            let text = "🎟 <b>Управление промокодами</b>\n\nЧтобы создать промокод, отправьте:\n<code>/admin promo_create &lt;код&gt; &lt;дни&gt; &lt;использования&gt;</code>\n\nПользователи могут активировать их командой <code>/promo &lt;код&gt;</code>";
+                            let _ = bot.edit_message_text(msg.chat().id, msg.id(), text).parse_mode(teloxide::types::ParseMode::Html).await;
+                        }
+                        "admins_menu" => {
+                            let text = "👑 <b>Управление администраторами</b>\n\nНазначить админа:\n<code>/admin add &lt;user_id&gt;</code>\n\nСнять админа:\n<code>/admin remove &lt;user_id&gt;</code>";
+                            let _ = bot.edit_message_text(msg.chat().id, msg.id(), text).parse_mode(teloxide::types::ParseMode::Html).await;
+                        }
+                        "reklama" => {
+                            let text = "📢 <b>Массовая рассылка</b>\n\nЧтобы отправить сообщение всем пользователям, используйте команду:\n<code>/admin broadcast &lt;ваш текст...&gt;</code>";
+                            let _ = bot.edit_message_text(msg.chat().id, msg.id(), text).parse_mode(teloxide::types::ParseMode::Html).await;
+                        }
+                        _ => {}
+                    }
+                }
+                bot.answer_callback_query(q.id).await?;
+                return Ok(());
+            }
+
             let quality_str = action;
             let short_id = target;
 

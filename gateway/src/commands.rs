@@ -15,6 +15,8 @@ pub enum Command {
     Premium,
     #[command(description = "Панель администратора")]
     Admin(String),
+    #[command(description = "Активировать промокод")]
+    Promo(String),
 }
 
 pub async fn handle(
@@ -123,7 +125,6 @@ pub async fn handle(
         Command::Admin(args) => {
             let admin_id_str = std::env::var("ADMIN_ID").unwrap_or_default();
             let admin_id: u64 = admin_id_str.parse().unwrap_or(0);
-
             let user = msg.from.as_ref();
             let user_id = user.map(|u| u.id.0).unwrap_or(0);
             let is_dev = user
@@ -131,17 +132,99 @@ pub async fn handle(
                 .map(|name| name.eq_ignore_ascii_case("UndaOn"))
                 .unwrap_or(false);
 
-            if user_id == 0 || (user_id != admin_id && !is_dev) {
+            let mut is_admin = user_id != 0 && (user_id == admin_id || is_dev);
+            if !is_admin && user_id != 0 {
+                if let Ok(mut conn) = redis_pool.get().await {
+                    let is_member: bool = redis::cmd("SISMEMBER")
+                        .arg("admins:set")
+                        .arg(user_id)
+                        .query_async(&mut conn)
+                        .await
+                        .unwrap_or(false);
+                    if is_member {
+                        is_admin = true;
+                    }
+                }
+            }
+
+            if !is_admin {
                 return Ok(());
             }
 
             let parts: Vec<&str> = args.split_whitespace().collect();
             if parts.is_empty() {
-                bot.send_message(
-                    msg.chat.id,
-                    "Использование:\n/admin give_premium <user_id> <days>",
-                )
-                .await?;
+                let keyboard = teloxide::types::InlineKeyboardMarkup::new(vec![
+                    vec![
+                        teloxide::types::InlineKeyboardButton::callback("📊 Статистика", "admin|stats"),
+                        teloxide::types::InlineKeyboardButton::callback("📜 Логи системы", "admin|logs"),
+                    ],
+                    vec![
+                        teloxide::types::InlineKeyboardButton::callback("🎟 Промокоды", "admin|promo"),
+                        teloxide::types::InlineKeyboardButton::callback("👑 Админы", "admin|admins_menu"),
+                    ],
+                    vec![
+                        teloxide::types::InlineKeyboardButton::callback("📢 Рассылка", "admin|reklama"),
+                    ],
+                ]);
+                bot.send_message(msg.chat.id, "🛠 <b>Dev Tool / Панель Управления</b>\n\nВыберите раздел для управления системой:")
+                    .reply_markup(keyboard)
+                    .parse_mode(teloxide::types::ParseMode::Html)
+                    .await?;
+                return Ok(());
+            }
+
+            if parts[0] == "add" && parts.len() == 2 {
+                if let Ok(new_admin) = parts[1].parse::<u64>() {
+                    if let Ok(mut conn) = redis_pool.get().await {
+                        let _: redis::RedisResult<()> = redis::cmd("SADD").arg("admins:set").arg(new_admin).query_async(&mut conn).await;
+                        bot.send_message(msg.chat.id, format!("Пользователь {} назначен администратором.", new_admin)).await?;
+                    }
+                }
+                return Ok(());
+            }
+
+            if parts[0] == "remove" && parts.len() == 2 {
+                if let Ok(old_admin) = parts[1].parse::<u64>() {
+                    if let Ok(mut conn) = redis_pool.get().await {
+                        let _: redis::RedisResult<()> = redis::cmd("SREM").arg("admins:set").arg(old_admin).query_async(&mut conn).await;
+                        bot.send_message(msg.chat.id, format!("Пользователь {} удален из администраторов.", old_admin)).await?;
+                    }
+                }
+                return Ok(());
+            }
+
+            if parts[0] == "promo_create" && parts.len() == 4 {
+                let code = parts[1];
+                if let (Ok(days), Ok(uses)) = (parts[2].parse::<i64>(), parts[3].parse::<i64>()) {
+                    let promo_data = serde_json::json!({
+                        "days": days,
+                        "max_uses": uses,
+                        "uses": 0
+                    });
+                    if let Ok(mut conn) = redis_pool.get().await {
+                        let _: redis::RedisResult<()> = redis::cmd("HSET").arg("promocodes").arg(code).arg(promo_data.to_string()).query_async(&mut conn).await;
+                        bot.send_message(msg.chat.id, format!("✅ Промокод <code>{}</code> создан!\nДней: {}\nМакс. использований: {}", code, days, uses)).parse_mode(teloxide::types::ParseMode::Html).await?;
+                    }
+                }
+                return Ok(());
+            }
+
+            if parts[0] == "broadcast" && parts.len() > 1 {
+                let text = parts[1..].join(" ");
+                if let Ok(mut conn) = redis_pool.get().await {
+                    let keys: Vec<String> = redis::cmd("KEYS").arg("user_settings:*").query_async(&mut conn).await.unwrap_or_default();
+                    let mut success = 0;
+                    for key in &keys {
+                        if let Some(uid_str) = key.strip_prefix("user_settings:") {
+                            if let Ok(uid) = uid_str.parse::<i64>() {
+                                if bot.send_message(teloxide::types::ChatId(uid), &text).await.is_ok() {
+                                    success += 1;
+                                }
+                            }
+                        }
+                    }
+                    bot.send_message(msg.chat.id, format!("📢 Рассылка завершена! Доставлено: {}/{}", success, keys.len())).await?;
+                }
                 return Ok(());
             }
 
@@ -184,7 +267,7 @@ pub async fn handle(
                             let _ = bot
                                 .send_message(
                                     teloxide::types::ChatId(target_id as i64),
-                                    format!("🎉 Вам был выдан Premium на {} дней!", days),
+                                    format!("🎉 Вам был выдан Premium на {} дней от Администрации!", days),
                                 )
                                 .await;
                             return Ok(());
@@ -193,8 +276,73 @@ pub async fn handle(
                 }
             }
 
-            bot.send_message(msg.chat.id, "Команда не распознана или неверные аргументы.")
+            bot.send_message(msg.chat.id, "Команда не распознана.\nДоступно: /admin, /admin add <id>, /admin remove <id>, /admin promo_create <code> <days> <uses>, /admin give_premium <id> <days>, /admin broadcast <текст>")
                 .await?;
+        }
+        Command::Promo(code) => {
+            let code = code.trim();
+            if code.is_empty() {
+                bot.send_message(msg.chat.id, "Использование: /promo <код>").await?;
+                return Ok(());
+            }
+
+            let user_id = msg.from.as_ref().map(|u| u.id.0).unwrap_or(0);
+            if user_id == 0 { return Ok(()); }
+
+            if let Ok(mut conn) = redis_pool.get().await {
+                // Check if user already used this promo
+                let used_key = format!("promo_users:{}", code);
+                let already_used: bool = redis::cmd("SISMEMBER").arg(&used_key).arg(user_id).query_async(&mut conn).await.unwrap_or(false);
+                if already_used {
+                    bot.send_message(msg.chat.id, "Вы уже активировали этот промокод.").await?;
+                    return Ok(());
+                }
+
+                // Check promo existence and stats
+                let promo_str: Option<String> = redis::cmd("HGET").arg("promocodes").arg(code).query_async(&mut conn).await.unwrap_or(None);
+                if let Some(json_str) = promo_str {
+                    if let Ok(mut promo_data) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                        let uses = promo_data["uses"].as_i64().unwrap_or(0);
+                        let max_uses = promo_data["max_uses"].as_i64().unwrap_or(0);
+                        let days = promo_data["days"].as_i64().unwrap_or(0);
+
+                        if uses >= max_uses {
+                            bot.send_message(msg.chat.id, "Этот промокод больше не действителен (лимит исчерпан).").await?;
+                            return Ok(());
+                        }
+
+                        // Apply premium
+                        let key = format!("user_settings:{}", user_id);
+                        let mut settings = fsocial_common::UserSettings::default();
+                        let res: redis::RedisResult<String> = redis::cmd("GET").arg(&key).query_async(&mut conn).await;
+                        if let Ok(val) = res {
+                            if let Ok(parsed) = serde_json::from_str::<fsocial_common::UserSettings>(&val) {
+                                settings = parsed;
+                            }
+                        }
+
+                        let now = chrono::Utc::now().timestamp();
+                        let current_until = settings.premium_until.unwrap_or(now).max(now);
+                        settings.premium_until = Some(current_until + days * 86400);
+
+                        if let Ok(json) = serde_json::to_string(&settings) {
+                            let _: redis::RedisResult<()> = redis::cmd("SET").arg(&key).arg(json).query_async(&mut conn).await;
+                            
+                            // Mark as used
+                            let _: redis::RedisResult<()> = redis::cmd("SADD").arg(&used_key).arg(user_id).query_async(&mut conn).await;
+                            
+                            // Increment uses
+                            promo_data["uses"] = serde_json::json!(uses + 1);
+                            let _: redis::RedisResult<()> = redis::cmd("HSET").arg("promocodes").arg(code).arg(promo_data.to_string()).query_async(&mut conn).await;
+
+                            bot.send_message(msg.chat.id, format!("🎉 Промокод успешно активирован! Вы получили Premium на {} дней.", days)).await?;
+                            return Ok(());
+                        }
+                    }
+                }
+                
+                bot.send_message(msg.chat.id, "Неверный промокод.").await?;
+            }
         }
     }
     Ok(())
