@@ -4,7 +4,6 @@ use tracing_subscriber::Layer;
 
 lazy_static::lazy_static! {
     pub static ref LOG_BUFFER: Arc<RwLock<VecDeque<String>>> = Arc::new(RwLock::new(VecDeque::with_capacity(100)));
-    pub static ref LOG_BROADCAST: tokio::sync::broadcast::Sender<String> = tokio::sync::broadcast::channel(100).0;
 }
 
 pub struct MemoryLogLayer;
@@ -18,8 +17,6 @@ impl<S: tracing::Subscriber> Layer<S> for MemoryLogLayer {
         // Very basic formatting
         let log_line = format!("[{}] {}: {}", meta.level(), meta.target(), visitor.0.trim());
         
-        let _ = LOG_BROADCAST.send(log_line.clone());
-
         if let Ok(mut buf) = LOG_BUFFER.write() {
             if buf.len() >= 100 {
                 buf.pop_front();

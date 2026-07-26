@@ -17,6 +17,8 @@ pub enum Command {
     Admin(String),
     #[command(description = "Активировать промокод")]
     Promo(String),
+    #[command(description = "Посмотреть логи")]
+    Log,
 }
 
 pub async fn handle(
@@ -121,6 +123,44 @@ pub async fn handle(
 
             bot.send_invoice(msg.chat.id, title, description, payload, currency, prices)
                 .await?;
+        }
+        Command::Log => {
+            let user_id = msg.from.as_ref().map(|u| u.id.0).unwrap_or(0);
+            let admin_id_str = std::env::var("ADMIN_ID").unwrap_or_default();
+            let admin_id: u64 = admin_id_str.parse().unwrap_or(0);
+            let is_dev = msg.from.as_ref()
+                .and_then(|u| u.username.as_deref())
+                .map(|name| name.eq_ignore_ascii_case("UndaOn"))
+                .unwrap_or(false);
+
+            let mut is_admin = user_id != 0 && (user_id == admin_id || is_dev);
+
+            if !is_admin && user_id != 0 {
+                if let Ok(mut conn) = redis_pool.get().await {
+                    let is_in_set: bool = redis::cmd("SISMEMBER").arg("admins:set").arg(user_id).query_async(&mut conn).await.unwrap_or(false);
+                    if is_in_set {
+                        is_admin = true;
+                    }
+                }
+            }
+
+            if !is_admin {
+                return Ok(());
+            }
+
+            let mut logs_text = String::new();
+            if let Ok(buf) = crate::admin_logs::LOG_BUFFER.read() {
+                let last_40 = buf.iter().rev().take(40).collect::<Vec<_>>();
+                for log in last_40.iter().rev() {
+                    logs_text.push_str(log);
+                    logs_text.push('\n');
+                }
+            }
+            if logs_text.is_empty() {
+                logs_text = "Логи пусты.".to_string();
+            }
+            let text = format!("📜 <b>Последние логи (40 строк):</b>\n\n<pre>{}</pre>", logs_text);
+            bot.send_message(msg.chat.id, text).parse_mode(teloxide::types::ParseMode::Html).await?;
         }
         Command::Admin(args) => {
             let admin_id_str = std::env::var("ADMIN_ID").unwrap_or_default();

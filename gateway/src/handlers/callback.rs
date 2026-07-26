@@ -296,32 +296,7 @@ pub async fn handle(
                                 logs_text = "Логи пусты.".to_string();
                             }
                             let text = format!("📜 <b>Последние логи (20 строк):</b>\n\n<pre>{}</pre>", logs_text);
-                            
-                            let mut is_streaming = false;
-                            if let Ok(mut conn) = redis_pool.get().await {
-                                let stream_val: Option<String> = redis::cmd("GET").arg("admin:log_stream_chat").query_async(&mut conn).await.unwrap_or(None);
-                                is_streaming = stream_val.is_some();
-                            }
-                            let stream_btn = if is_streaming {
-                                teloxide::types::InlineKeyboardButton::callback("⏹ Выключить стриминг логов в чат", "admin|stop_log_stream")
-                            } else {
-                                teloxide::types::InlineKeyboardButton::callback("▶️ Включить стриминг логов в чат", "admin|start_log_stream")
-                            };
-                            let keyboard = teloxide::types::InlineKeyboardMarkup::new(vec![vec![stream_btn]]);
-
-                            let _ = bot.edit_message_text(msg.chat().id, msg.id(), text).reply_markup(keyboard).parse_mode(teloxide::types::ParseMode::Html).await;
-                        }
-                        "start_log_stream" => {
-                            if let Ok(mut conn) = redis_pool.get().await {
-                                let _: redis::RedisResult<()> = redis::cmd("SET").arg("admin:log_stream_chat").arg(msg.chat().id.0).query_async(&mut conn).await;
-                                let _ = bot.edit_message_text(msg.chat().id, msg.id(), "▶️ Стриминг логов включён. Новые логи будут приходить в этот чат каждые 3 секунды.").await;
-                            }
-                        }
-                        "stop_log_stream" => {
-                            if let Ok(mut conn) = redis_pool.get().await {
-                                let _: redis::RedisResult<()> = redis::cmd("DEL").arg("admin:log_stream_chat").query_async(&mut conn).await;
-                                let _ = bot.edit_message_text(msg.chat().id, msg.id(), "⏹ Стриминг логов выключен.").await;
-                            }
+                            let _ = bot.edit_message_text(msg.chat().id, msg.id(), text).parse_mode(teloxide::types::ParseMode::Html).await;
                         }
                         "promo" => {
                             if let Ok(mut conn) = redis_pool.get().await {

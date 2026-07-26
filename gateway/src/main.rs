@@ -99,40 +99,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await;
     });
 
-    // Background task for streaming logs to admin
-    let mut rx_logs = crate::admin_logs::LOG_BROADCAST.subscribe();
-    let bot_for_logs = bot.clone();
-    let redis_for_logs = redis_pool.clone();
-    tokio::spawn(async move {
-        let mut buffer = String::new();
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(3));
-        loop {
-            tokio::select! {
-                Ok(line) = rx_logs.recv() => {
-                    buffer.push_str(&line);
-                    buffer.push('\n');
-                }
-                _ = interval.tick() => {
-                    if !buffer.is_empty() {
-                        if let Ok(mut conn) = redis_for_logs.get().await {
-                            if let Ok(admin_id_str) = redis::cmd("GET").arg("admin:log_stream_chat").query_async::<String>(&mut conn).await {
-                                if let Ok(admin_chat_id) = admin_id_str.parse::<i64>() {
-                                    // Limit chunk size if too big
-                                    let mut to_send = &buffer[..];
-                                    if to_send.len() > 3800 {
-                                        to_send = &to_send[to_send.len() - 3800..];
-                                    }
-                                    let _ = bot_for_logs.send_message(teloxide::types::ChatId(admin_chat_id), format!("<pre>{}</pre>", to_send)).parse_mode(teloxide::types::ParseMode::Html).await;
-                                }
-                            }
-                        }
-                        buffer.clear();
-                    }
-                }
-            }
-        }
-    });
-
     info!("NATS listener started. Setting up Telegram handlers...");
 
     let handler = Update::filter_message()
