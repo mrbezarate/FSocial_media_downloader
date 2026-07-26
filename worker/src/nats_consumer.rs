@@ -373,10 +373,35 @@ pub async fn run(ctx: Arc<WorkerContext>, mut shutdown_rx: tokio::sync::watch::R
 
                         while attempts < max_attempts {
                             attempts += 1;
-                            let result = if current_task.platform == Platform::Spotify {
-                                crate::audio::process_spotify_task(&ctx_clone, &current_task, Some(tx_clone.clone())).await
-                            } else {
-                                crate::media::process_media_task(&ctx_clone, &current_task, Some(tx_clone.clone())).await
+                            
+                            let abort_future = async {
+                                loop {
+                                    if let Some(state) = ctx_clone.task_states.get(&current_task.task_id).await {
+                                        if matches!(state, fsocial_common::TaskCommandAction::Abort) {
+                                            return true;
+                                        }
+                                    }
+                                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                                }
+                            };
+
+                            let process_future = async {
+                                if current_task.platform == Platform::Spotify {
+                                    crate::audio::process_spotify_task(&ctx_clone, &current_task, Some(tx_clone.clone())).await
+                                } else {
+                                    crate::media::process_media_task(&ctx_clone, &current_task, Some(tx_clone.clone())).await
+                                }
+                            };
+
+                            let result = tokio::select! {
+                                aborted = abort_future => {
+                                    if aborted {
+                                        Err(fsocial_common::AppError::Download("Скачивание прервано пользователем".into()))
+                                    } else {
+                                        Err(fsocial_common::AppError::Download("Unknown abort error".into()))
+                                    }
+                                }
+                                res = process_future => res,
                             };
 
                             match result {

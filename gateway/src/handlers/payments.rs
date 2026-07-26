@@ -1,6 +1,6 @@
 use teloxide::prelude::*;
 use teloxide::types::PreCheckoutQuery;
-use tracing::{info, error};
+use tracing::info;
 
 pub async fn handle_pre_checkout_query(bot: crate::MyBot, q: PreCheckoutQuery) -> ResponseResult<()> {
     // Approve all pre-checkout queries for stars

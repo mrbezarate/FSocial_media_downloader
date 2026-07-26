@@ -57,6 +57,7 @@ pub async fn download(
     info!("Running yt-dlp command: {:?}", cmd);
     let mut child = cmd.stdout(Stdio::piped())
                        .stderr(Stdio::piped())
+                       .kill_on_drop(true)
                        .spawn()?;
 
     let stdout = child.stdout.take().unwrap();
@@ -77,9 +78,10 @@ pub async fn download(
     });
 
     while let Ok(Some(line)) = reader.next_line().await {
-        if line.starts_with("[download]") && line.contains("%") {
+        let trimmed = line.trim_start_matches('\r').trim_start();
+        if trimmed.starts_with("[download]") && trimmed.contains("%") {
             if let Some(tx) = &progress_tx {
-                let _ = tx.send(fsocial_common::ProgressEvent::Line(line)).await;
+                let _ = tx.send(fsocial_common::ProgressEvent::Line(trimmed.to_string())).await;
             }
         }
     }

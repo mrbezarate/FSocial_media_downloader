@@ -84,7 +84,7 @@ pub async fn handle(bot: crate::MyBot, msg: Message, cmd: Command, redis_pool: d
             let title = "Premium Подписка 💎";
             let description = "Месяц безграничных загрузок: неограниченный трафик, плейлисты любой длины и максимальный приоритет в очереди!";
             let payload = "premium_1_month";
-            let provider_token = ""; // Оставляем пустым для Telegram Stars
+            let _provider_token = ""; // Оставляем пустым для Telegram Stars
             let currency = "XTR"; // Telegram Stars
             let prices = vec![teloxide::types::LabeledPrice {
                 label: "1 Месяц Premium".into(),
