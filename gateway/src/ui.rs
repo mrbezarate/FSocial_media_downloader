@@ -4,7 +4,7 @@ use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
 pub struct UiBuilder;
 
 impl UiBuilder {
-    pub fn build_info_message(info: &InfoResponse, max_size_mb: f64) -> String {
+    pub fn build_info_message(info: &InfoResponse, max_size_mb: f64, is_premium: bool) -> String {
         if info.is_playlist {
             let safe_title = html_escape(&info.title);
             let mut dur_str = String::new();
@@ -85,9 +85,9 @@ impl UiBuilder {
                 .unwrap_or(false)
         });
 
-        if has_large_files {
+        if has_large_files && !is_premium {
             lines.push(format!(
-                "⚠️ Файлы > {} МБ не входят в ваш уровень подписки.",
+                "⚠️ Файлы > {} МБ ограничены лимитами Telegram.",
                 max_size_mb
             ));
         }
@@ -99,6 +99,7 @@ impl UiBuilder {
         info: &InfoResponse,
         short_id: &str,
         max_size_mb: f64,
+        is_premium: bool,
     ) -> InlineKeyboardMarkup {
         if info.is_playlist {
             let mut default_q = Quality::Video720p;
@@ -141,7 +142,7 @@ impl UiBuilder {
                 Quality::AudioBest => "🎵 MP3".to_string(),
             };
 
-            if size_mb > max_size_mb {
+            if size_mb > max_size_mb && !is_premium {
                 text = format!("⚠️ {}", text);
             }
 

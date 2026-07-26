@@ -190,9 +190,9 @@ pub async fn handle(
                 }
 
                 let max_size = if config.is_local_api() { 2000.0 } else { 50.0 };
-                let text = crate::ui::UiBuilder::build_info_message(&info, max_size);
+                let text = crate::ui::UiBuilder::build_info_message(&info, max_size, is_premium);
                 let keyboard =
-                    crate::ui::UiBuilder::build_quality_keyboard(&info, &short_id, max_size);
+                    crate::ui::UiBuilder::build_quality_keyboard(&info, &short_id, max_size, is_premium);
 
                 let mut sent_photo = false;
                 if let Some(thumb_url) = info.thumbnail {
