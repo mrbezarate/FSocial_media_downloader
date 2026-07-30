@@ -354,12 +354,18 @@ pub async fn handle(
                     if let Some(url_match) = url_parser::detect(&url_str) {
 
                         if let Some(msg) = q.message {
-                            // we moved edit_message_text down after task generation
-
                             let user_id = q.from.id.0;
                             let chat_id = msg.chat().id.0;
                             let message_id = msg.id().0;
                             let chat = msg.chat().id;
+
+                            // Мгновенный фидбэк для UX! Скрываем кнопки и меняем текст до тяжелых проверок.
+                            let _ = bot.edit_message_reply_markup(chat, msg.id())
+                                .reply_markup(teloxide::types::InlineKeyboardMarkup::default())
+                                .await;
+                            if let Err(_) = bot.edit_message_text(chat, msg.id(), "⏳ Подготовка к загрузке...").await {
+                                let _ = bot.edit_message_caption(chat, msg.id()).caption("⏳ Подготовка к загрузке...").await;
+                            }
 
                             let mut settings = fsocial_common::UserSettings::default();
                             if let Ok(mut conn) = redis_pool.get().await {
