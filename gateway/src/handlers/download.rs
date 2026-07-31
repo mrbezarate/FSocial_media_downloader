@@ -97,7 +97,10 @@ pub async fn handle(
     if bypass_info {
         let default_quality = if url_match.platform == fsocial_common::Platform::Pinterest {
             fsocial_common::Quality::Best
-        } else if url_match.media_type == fsocial_common::MediaType::Audio {
+        } else if url_match.media_type == fsocial_common::MediaType::Audio
+            || url_match.platform == fsocial_common::Platform::Spotify
+            || url_match.platform == fsocial_common::Platform::SoundCloud
+        {
             settings.default_audio
         } else {
             settings.default_video
@@ -146,7 +149,10 @@ pub async fn handle(
         if let Some(file_id) = cached_file_id {
             let input_file = teloxide::types::InputFile::file_id(teloxide::types::FileId(file_id));
             let bot_watermark = "\n\nСкачано с помощью бота @FSocial_Media_Downloader_bot";
-            let send_res = if task.media_type == fsocial_common::MediaType::Audio {
+            let send_res = if task.media_type == fsocial_common::MediaType::Audio
+                || task.platform == fsocial_common::Platform::Spotify
+                || task.platform == fsocial_common::Platform::SoundCloud
+            {
                 bot.send_audio(msg.chat.id, input_file)
                     .caption(bot_watermark.trim_start())
                     .reply_parameters(teloxide::types::ReplyParameters::new(msg.id))
@@ -176,12 +182,22 @@ pub async fn handle(
         };
         let short_id = uuid::Uuid::new_v4().to_string()[..8].to_string();
         url_cache
-            .lock()
-            .await
-            .insert(short_id.clone(), url_match.url.clone());
+            .insert(short_id.clone(), url_match.url.clone())
+            .await;
+
+        // Мгновенный отклик, чтобы пользователь видел, что бот работает, даже если кидает несколько ссылок
+        let processing_msg = bot
+            .send_message(msg.chat.id, "⏳ <i>Анализирую ссылку...</i>")
+            .parse_mode(teloxide::types::ParseMode::Html)
+            .reply_parameters(teloxide::types::ReplyParameters::new(msg.id))
+            .await;
 
         match nats.request_info(&req).await {
             Ok(info) => {
+                if let Ok(pm) = &processing_msg {
+                    let _ = bot.delete_message(msg.chat.id, pm.id).await;
+                }
+
                 if info.is_playlist && info.playlist_count.unwrap_or(0) > 50 && !is_premium {
                     let _ = bot.send_message(msg.chat.id, "❌ Бесплатные пользователи могут скачивать плейлисты только до 50 треков. Оформите Premium для снятия ограничений.")
                         .reply_parameters(teloxide::types::ReplyParameters::new(msg.id))
@@ -222,6 +238,10 @@ pub async fn handle(
                 return Ok(());
             }
             Err(e) => {
+                if let Ok(pm) = &processing_msg {
+                    let _ = bot.delete_message(msg.chat.id, pm.id).await;
+                }
+
                 tracing::error!("request_info failed: {}", e);
                 // Link is broken, private or invalid -> delete user's message and inform
                 let _ = bot.delete_message(msg.chat.id, msg.id).await;

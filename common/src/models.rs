@@ -256,6 +256,99 @@ impl DownloadTask {
 
 // ─── Task Result (Worker → Gateway via NATS) ─────────────────────────────────
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum OutputKind {
+    Video,
+    Audio,
+    Photo,
+    Document,
+    Text,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum OutputUri {
+    LocalFile(String),
+    RemoteHttp(String),
+    S3(String),
+}
+
+impl OutputUri {
+    pub fn as_str(&self) -> &str {
+        match self {
+            OutputUri::LocalFile(p) => p,
+            OutputUri::RemoteHttp(u) => u,
+            OutputUri::S3(s) => s,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum OutputPayload {
+    Resource { uri: OutputUri },
+    InlineText { text: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VideoMeta {
+    pub duration_secs: Option<u64>,
+    pub thumb_uri: Option<OutputUri>,
+    pub title: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AudioMeta {
+    pub duration_secs: Option<u64>,
+    pub performer: Option<String>,
+    pub title: Option<String>,
+    pub thumb_uri: Option<OutputUri>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageMeta {
+    pub title: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocumentMeta {
+    pub title: Option<String>,
+    pub thumb_uri: Option<OutputUri>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum OutputMetadata {
+    Video(VideoMeta),
+    Audio(AudioMeta),
+    Image(ImageMeta),
+    Document(DocumentMeta),
+    None,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum CleanupStrategy {
+    DeleteAfterDelivery,
+    DeleteAfterTTL(u64),
+    Retain,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum OutputRole {
+    Primary,
+    Secondary,
+    Caption,
+    Log,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Output {
+    pub kind: OutputKind,
+    pub role: OutputRole,
+    pub payload: OutputPayload,
+    pub metadata: OutputMetadata,
+    pub cleanup: CleanupStrategy,
+    pub cache_key: Option<String>,
+}
+
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskResult {
     pub task_id: String,
@@ -291,6 +384,11 @@ pub enum TaskStatus {
             Option<String>,
         )>, // path, title, duration, performer, thumb_path, is_audio, cache_key
         playlist_title: String,
+        failed_count: u32,
+        failed_items: Vec<String>,
+    },
+    V2Completed {
+        outputs: Vec<Output>,
         failed_count: u32,
         failed_items: Vec<String>,
     },

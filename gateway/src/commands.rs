@@ -111,7 +111,28 @@ pub async fn handle(
                 .await?;
         }
         Command::Premium => {
-            let text = "💎 <b>Premium Подписка</b>\n\nВыберите период подписки:\n\n• <b>1 День</b> - 20 ⭐ (попробовать!)\n• <b>1 Месяц</b> - 500 ⭐\n• <b>1 Год</b> - 4800 ⭐ (Выгода 20%!)";
+            let user_id = msg.from.as_ref().map(|u| u.id.0).unwrap_or(0);
+            let mut status_text = String::from("\n\n✨ <b>Твой статус:</b> Отсутствует");
+            if let Ok(mut conn) = redis_pool.get().await {
+                let key = format!("user_settings:{}", user_id);
+                let res: redis::RedisResult<String> = redis::cmd("GET").arg(&key).query_async(&mut conn).await;
+                if let Ok(val) = res {
+                    if let Ok(settings) = serde_json::from_str::<fsocial_common::UserSettings>(&val) {
+                        let now = chrono::Utc::now().timestamp();
+                        if let Some(until) = settings.premium_until {
+                            if until > now {
+                                let remaining_secs = until - now;
+                                let days = remaining_secs / 86400;
+                                let hours = (remaining_secs % 86400) / 3600;
+                                status_text = format!("\n\n✨ <b>Твой статус:</b> Активен\n⏳ <b>Осталось:</b> {} дн. {} ч.", days, hours);
+                            } else {
+                                status_text = format!("\n\n✨ <b>Твой статус:</b> Закончился");
+                            }
+                        }
+                    }
+                }
+            }
+            let text = format!("💎 <b>Premium Подписка</b>{}\n\nВыберите период подписки:\n\n• <b>1 День</b> - 20 ⭐ (попробовать!)\n• <b>1 Месяц</b> - 500 ⭐\n• <b>1 Год</b> - 4800 ⭐ (Выгода 20%!)", status_text);
             let keyboard = teloxide::types::InlineKeyboardMarkup::new(vec![
                 vec![teloxide::types::InlineKeyboardButton::callback("1 День (20 ⭐)", "invoice|day")],
                 vec![teloxide::types::InlineKeyboardButton::callback("1 Месяц (500 ⭐)", "invoice|month")],

@@ -10,7 +10,9 @@ pub struct NatsClient {
 
 impl NatsClient {
     pub async fn connect(url: &str) -> Result<Self, AppError> {
-        let client = async_nats::connect(url)
+        let client = async_nats::ConnectOptions::new()
+            .request_timeout(Some(std::time::Duration::from_secs(60)))
+            .connect(url)
             .await
             .map_err(|e| AppError::Nats(e.to_string()))?;
         let jetstream = jetstream::new(client.clone());
@@ -81,9 +83,9 @@ impl NatsClient {
         let req_future = self
             .client
             .request(subjects::INFO_REQUEST.to_string(), payload.into());
-        let reply = tokio::time::timeout(std::time::Duration::from_secs(30), req_future)
+        let reply = tokio::time::timeout(std::time::Duration::from_secs(60), req_future)
             .await
-            .map_err(|_| AppError::Nats("Request timed out after 30 seconds".into()))?
+            .map_err(|_| AppError::Nats("Request timed out after 60 seconds".into()))?
             .map_err(|e| AppError::Nats(e.to_string()))?;
         let info_res: fsocial_common::InfoResponse =
             serde_json::from_slice(&reply.payload).map_err(|e| AppError::Nats(e.to_string()))?;

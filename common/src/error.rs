@@ -76,6 +76,9 @@ impl AppError {
                     || msg_lower.contains("captcha")
                     || msg_lower.contains("connection")
                     || msg_lower.contains("timeout")
+                    || msg_lower.contains("temporary failure")
+                    || msg_lower.contains("name resolution")
+                    || msg_lower.contains("name or service not known")
             }
             _ => false,
         }

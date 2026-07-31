@@ -704,6 +704,57 @@ pub async fn run(
                         is_audio,
                         cache_key,
                     ) = completed_files.remove(0);
+                    use fsocial_common::{Output, OutputKind, OutputUri, OutputPayload, OutputMetadata, VideoMeta, AudioMeta, CleanupStrategy};
+                    
+                    // Logical Pipeline Step: Extract Metadata & Build Outputs
+                    let outputs = if is_audio {
+                        let audio_output = Output {
+                            kind: OutputKind::Audio,
+                            role: fsocial_common::OutputRole::Primary,
+                            payload: OutputPayload::Resource { uri: OutputUri::LocalFile(file_path.clone()) },
+                            metadata: OutputMetadata::Audio(AudioMeta {
+                                duration_secs,
+                                performer: performer.clone(),
+                                title: Some(title.clone()),
+                                thumb_uri: thumb_path.map(OutputUri::LocalFile),
+                            }),
+                            cleanup: CleanupStrategy::DeleteAfterDelivery,
+                            cache_key: cache_key.clone(),
+                        };
+                        
+                        let text_summary = format!(
+                            "🎵 *Название*: {}\n👤 *Исполнитель*: {}\n⏱ *Длительность*: {} сек",
+                            title,
+                            performer.as_deref().unwrap_or("Неизвестен"),
+                            duration_secs.unwrap_or(0)
+                        );
+                        
+                        let text_output = Output {
+                            kind: OutputKind::Text,
+                            role: fsocial_common::OutputRole::Caption,
+                            payload: OutputPayload::InlineText { text: text_summary },
+                            metadata: OutputMetadata::None,
+                            cleanup: CleanupStrategy::Retain,
+                            cache_key: None,
+                        };
+                        
+                        // Emit both outputs to test multi-output delivery and generic handling
+                        vec![audio_output, text_output]
+                    } else {
+                        vec![Output {
+                            kind: OutputKind::Video,
+                            role: fsocial_common::OutputRole::Primary,
+                            payload: OutputPayload::Resource { uri: OutputUri::LocalFile(file_path) },
+                            metadata: OutputMetadata::Video(VideoMeta {
+                                duration_secs,
+                                title: Some(title),
+                                thumb_uri: thumb_path.map(OutputUri::LocalFile),
+                            }),
+                            cleanup: CleanupStrategy::DeleteAfterDelivery,
+                            cache_key,
+                        }]
+                    };
+
                     let res = TaskResult {
                         task_id: task.task_id.clone(),
                         user_id: task.user_id,
@@ -712,14 +763,10 @@ pub async fn run(
                         status_is_media: task.status_is_media,
                         reply_to_message_id: task.reply_to_message_id,
                         is_group: task.is_group,
-                        status: TaskStatus::Completed {
-                            file_path,
-                            title,
-                            duration_secs,
-                            performer,
-                            thumb_path,
-                            is_audio,
-                            cache_key,
+                        status: TaskStatus::V2Completed {
+                            outputs,
+                            failed_count: 0,
+                            failed_items: vec![],
                         },
                     };
                     publish_result(&ctx_clone.nats_client, &res).await;

@@ -40,6 +40,9 @@ pub struct AppConfig {
     pub ytdlp_path: String,
     pub ffmpeg_path: String,
     pub cookies_path: Option<String>,
+
+    // ─── Feature Flags ───────────────────────────────────────────────
+    pub use_v2_only: bool,
 }
 
 impl AppConfig {
@@ -88,6 +91,10 @@ impl AppConfig {
             ffmpeg_path: env::var("FFMPEG_PATH").unwrap_or_else(|_| "ffmpeg".into()),
 
             cookies_path: env::var("COOKIES_PATH").ok().filter(|s| !s.is_empty()),
+
+            use_v2_only: env::var("USE_V2_ONLY")
+                .map(|v| v.to_lowercase() == "true" || v == "1")
+                .unwrap_or(false),
         })
     }
 

@@ -22,7 +22,28 @@ pub async fn handle(
         let parts: Vec<&str> = data.splitn(2, '|').collect();
 
         if parts[0] == "buy_premium" {
-            let text = "💎 <b>Premium Подписка</b>\n\nВыберите период подписки:\n\n• <b>1 День</b> - 20 ⭐ (попробовать!)\n• <b>1 Месяц</b> - 500 ⭐\n• <b>1 Год</b> - 4800 ⭐ (Выгода 20%!)";
+            let user_id = q.from.id.0;
+            let mut status_text = String::from("\n\n✨ <b>Твой статус:</b> Отсутствует");
+            if let Ok(mut conn) = redis_pool.get().await {
+                let key = format!("user_settings:{}", user_id);
+                let res: redis::RedisResult<String> = redis::cmd("GET").arg(&key).query_async(&mut conn).await;
+                if let Ok(val) = res {
+                    if let Ok(settings) = serde_json::from_str::<fsocial_common::UserSettings>(&val) {
+                        let now = chrono::Utc::now().timestamp();
+                        if let Some(until) = settings.premium_until {
+                            if until > now {
+                                let remaining_secs = until - now;
+                                let days = remaining_secs / 86400;
+                                let hours = (remaining_secs % 86400) / 3600;
+                                status_text = format!("\n\n✨ <b>Твой статус:</b> Активен\n⏳ <b>Осталось:</b> {} дн. {} ч.", days, hours);
+                            } else {
+                                status_text = format!("\n\n✨ <b>Твой статус:</b> Закончился");
+                            }
+                        }
+                    }
+                }
+            }
+            let text = format!("💎 <b>Premium Подписка</b>{}\n\nВыберите период подписки:\n\n• <b>1 День</b> - 20 ⭐ (попробовать!)\n• <b>1 Месяц</b> - 500 ⭐\n• <b>1 Год</b> - 4800 ⭐ (Выгода 20%!)", status_text);
             let keyboard = teloxide::types::InlineKeyboardMarkup::new(vec![
                 vec![teloxide::types::InlineKeyboardButton::callback("1 День (20 ⭐)", "invoice|day")],
                 vec![teloxide::types::InlineKeyboardButton::callback("1 Месяц (500 ⭐)", "invoice|month")],
@@ -347,7 +368,10 @@ pub async fn handle(
             let short_id = target;
 
             // Retrieve actual URL from cache
-            let original_url = url_cache.lock().await.remove(short_id);
+            let original_url = url_cache.get(short_id).await;
+            if original_url.is_some() {
+                url_cache.invalidate(short_id).await;
+            }
 
             if let Some(quality) = Quality::from_callback(quality_str) {
                 if let Some(url_str) = original_url {
@@ -358,6 +382,18 @@ pub async fn handle(
                             let chat_id = msg.chat().id.0;
                             let message_id = msg.id().0;
                             let chat = msg.chat().id;
+
+                            // Блокировка двойного нажатия (идемпотентность)
+                            let lock_key = format!("dl_lock:{}:{}", chat_id, message_id);
+                            if let Ok(mut conn) = redis_pool.get().await {
+                                let res: redis::RedisResult<Option<String>> = redis::cmd("SET")
+                                    .arg(&lock_key).arg("1").arg("NX").arg("EX").arg("10")
+                                    .query_async(&mut conn).await;
+                                if let Ok(None) = res {
+                                    tracing::warn!("Duplicate download click detected for message {}", message_id);
+                                    return Ok(());
+                                }
+                            }
 
                             // Мгновенный фидбэк для UX! Скрываем кнопки и меняем текст до тяжелых проверок.
                             let _ = bot.edit_message_reply_markup(chat, msg.id())

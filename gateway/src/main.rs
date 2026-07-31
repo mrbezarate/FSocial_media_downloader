@@ -4,8 +4,6 @@ use teloxide::prelude::*;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
-use std::collections::HashMap;
-use std::sync::Arc;
 use tokio::sync::Mutex;
 
 mod admin_logs;
@@ -16,7 +14,7 @@ mod nats_listener;
 mod ui;
 mod url_parser;
 
-pub type UrlCache = Arc<Mutex<HashMap<String, String>>>;
+pub type UrlCache = moka::future::Cache<String, String>;
 pub type TaskStates = moka::future::Cache<String, String>;
 
 pub type MyBot = teloxide::adaptors::CacheMe<teloxide::adaptors::Throttle<teloxide::Bot>>;
@@ -75,7 +73,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let nats_clone = nats_client.clone();
     let config_clone = config.clone();
 
-    let url_cache: UrlCache = Arc::new(Mutex::new(HashMap::new()));
+    let url_cache: UrlCache = moka::future::Cache::builder()
+        .time_to_live(std::time::Duration::from_secs(4 * 3600))
+        .build();
     let task_states: TaskStates = moka::future::Cache::builder()
         .time_to_live(std::time::Duration::from_secs(4 * 3600))
         .build();

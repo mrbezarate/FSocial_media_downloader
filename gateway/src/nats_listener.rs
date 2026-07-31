@@ -54,6 +54,7 @@ async fn handle_result(
     let is_terminal = match &res.status {
         TaskStatus::Completed { .. } => true,
         TaskStatus::PlaylistCompleted { .. } => true,
+        TaskStatus::V2Completed { .. } => true,
         TaskStatus::Failed { retryable, .. } => !retryable,
         _ => false,
     };
@@ -78,6 +79,10 @@ async fn handle_result(
             cache_key,
             ..
         } => {
+            if config.use_v2_only {
+                tracing::error!("Legacy Completed status received but USE_V2_ONLY is enabled. Skipping.");
+                return;
+            }
             let path = PathBuf::from(&file_path);
 
             if let Ok(meta) = tokio::fs::metadata(&path).await {
@@ -352,6 +357,10 @@ async fn handle_result(
             failed_count,
             failed_items,
         } => {
+            if config.use_v2_only {
+                tracing::error!("Legacy PlaylistCompleted status received but USE_V2_ONLY is enabled. Skipping.");
+                return;
+            }
             tracing::info!(
                 "Received PlaylistCompleted for chat {} with {} files",
                 chat_id,
@@ -501,6 +510,77 @@ async fn handle_result(
                 }
             }
         }
+        TaskStatus::V2Completed { mut outputs, failed_count, failed_items } => {
+            tracing::info!("Received V2Completed for chat {} with {} outputs", chat_id, outputs.len());
+            
+            outputs.sort_by_key(|o| match o.role {
+                fsocial_common::OutputRole::Primary => 0,
+                fsocial_common::OutputRole::Secondary => 1,
+                fsocial_common::OutputRole::Caption => 2,
+                fsocial_common::OutputRole::Log => 3,
+            });
+
+            let http_client = reqwest::Client::new();
+            let resolver = DefaultUriResolver { http_client };
+            let mapper = TelegramPresentationMapper { config, resolver: &resolver };
+            let delivery = TelegramDelivery { bot, chat_id, config, resolver: &resolver };
+
+            let mut conn = redis_pool.get().await.expect("Redis pool");
+
+            for (idx, output) in outputs.into_iter().enumerate() {
+                let idempotency_key = format!("idempotency:{}:{}:{}", res.task_id, idx, output.cache_key.as_deref().unwrap_or(""));
+                let was_set: bool = redis::cmd("SETNX")
+                    .arg(&idempotency_key)
+                    .arg(1)
+                    .query_async(&mut conn)
+                    .await
+                    .unwrap_or(true);
+                
+                if !was_set {
+                    tracing::info!("Output {} already sent. Skipping duplicate.", idempotency_key);
+                    continue;
+                }
+                let _: redis::RedisResult<()> = redis::cmd("EXPIRE").arg(&idempotency_key).arg(86400).query_async(&mut conn).await;
+
+                match mapper.map(&output, res.reply_to_message_id).await {
+                    Ok(presentation) => {
+                        match delivery.deliver(presentation).await {
+                            Ok(_) => tracing::info!("Successfully sent output to chat {}", chat_id),
+                            Err(e) => tracing::error!("Failed to send output to chat {}: {}", chat_id, e),
+                        }
+                    },
+                    Err(e) => tracing::error!("Failed to map presentation: {}", e),
+                }
+
+                if output.cleanup == fsocial_common::CleanupStrategy::DeleteAfterDelivery {
+                    if let fsocial_common::OutputPayload::Resource { uri } = &output.payload {
+                        if let fsocial_common::OutputUri::LocalFile(path_str) = uri {
+                            let _ = tokio::fs::remove_file(path_str).await;
+                        }
+                    }
+                    
+                    let thumb_uri = match &output.metadata {
+                        fsocial_common::OutputMetadata::Video(m) => &m.thumb_uri,
+                        fsocial_common::OutputMetadata::Audio(m) => &m.thumb_uri,
+                        fsocial_common::OutputMetadata::Document(m) => &m.thumb_uri,
+                        _ => &None,
+                    };
+                    if let Some(fsocial_common::OutputUri::LocalFile(thumb_str)) = thumb_uri {
+                        let _ = tokio::fs::remove_file(thumb_str).await;
+                    }
+                }
+            }
+
+            if failed_count > 0 {
+                let msg = format!("⚠️ Не удалось скачать {} элементов:\n{}", failed_count, failed_items.join("\n"));
+                let _ = bot.send_message(chat_id, msg).await;
+            }
+
+            if let Some(msg_id) = res.status_message_id {
+                let mid = teloxide::types::MessageId(msg_id);
+                let _ = bot.delete_message(chat_id, mid).await;
+            }
+        }
         TaskStatus::Failed {
             ref error,
             retryable,
@@ -612,5 +692,233 @@ async fn handle_progress(bot: &crate::MyBot, res: TaskResult, task_states: &crat
             }
         }
         _ => {}
+    }
+}
+
+pub enum ResolvedResource {
+    LocalTempFile(std::path::PathBuf),
+    DirectUrl(String),
+}
+
+pub trait UriResolver: Send + Sync {
+    fn resolve(&self, uri: &fsocial_common::OutputUri) -> impl std::future::Future<Output = Result<ResolvedResource, Box<dyn std::error::Error + Send + Sync>>> + Send;
+    fn download_to_temp(&self, url: &str) -> impl std::future::Future<Output = Result<std::path::PathBuf, Box<dyn std::error::Error + Send + Sync>>> + Send;
+}
+
+pub struct DefaultUriResolver {
+    pub http_client: reqwest::Client,
+}
+
+impl UriResolver for DefaultUriResolver {
+    async fn resolve(&self, uri: &fsocial_common::OutputUri) -> Result<ResolvedResource, Box<dyn std::error::Error + Send + Sync>> {
+        use fsocial_common::OutputUri;
+        match uri {
+            OutputUri::LocalFile(path) => Ok(ResolvedResource::LocalTempFile(std::path::PathBuf::from(path))),
+            OutputUri::RemoteHttp(url) => Ok(ResolvedResource::DirectUrl(url.clone())),
+            OutputUri::S3(_) => Err("S3 not implemented".into()),
+        }
+    }
+
+    async fn download_to_temp(&self, url: &str) -> Result<std::path::PathBuf, Box<dyn std::error::Error + Send + Sync>> {
+        let resp = self.http_client.get(url).send().await?.error_for_status()?;
+        let bytes = resp.bytes().await?;
+        let temp_dir = std::env::temp_dir();
+        let file_path = temp_dir.join(format!("{}.tmp", uuid::Uuid::new_v4()));
+        tokio::fs::write(&file_path, bytes).await?;
+        Ok(file_path)
+    }
+}
+
+pub enum TelegramMessage {
+    Video { input_file: teloxide::types::InputFile, caption: Option<String>, thumb: Option<teloxide::types::InputFile>, reply_to: Option<i32>, fallback_url: Option<String> },
+    Audio { input_file: teloxide::types::InputFile, caption: Option<String>, thumb: Option<teloxide::types::InputFile>, title: Option<String>, performer: Option<String>, reply_to: Option<i32>, fallback_url: Option<String> },
+    Photo { input_file: teloxide::types::InputFile, caption: Option<String>, reply_to: Option<i32>, fallback_url: Option<String> },
+    Document { input_file: teloxide::types::InputFile, caption: Option<String>, thumb: Option<teloxide::types::InputFile>, reply_to: Option<i32>, fallback_url: Option<String> },
+    Text { text: String, reply_to: Option<i32> },
+}
+
+pub trait PresentationMapper: Send + Sync {
+    fn map<'a>(&'a self, output: &'a fsocial_common::Output, reply_to_message_id: Option<i32>) -> impl std::future::Future<Output = Result<TelegramMessage, Box<dyn std::error::Error + Send + Sync>>> + Send + 'a;
+}
+
+pub struct TelegramPresentationMapper<'a, R: UriResolver> {
+    pub config: &'a fsocial_common::AppConfig,
+    pub resolver: &'a R,
+}
+
+impl<'a, R: UriResolver> PresentationMapper for TelegramPresentationMapper<'a, R> {
+    fn map<'b>(&'b self, output: &'b fsocial_common::Output, reply_to_message_id: Option<i32>) -> impl std::future::Future<Output = Result<TelegramMessage, Box<dyn std::error::Error + Send + Sync>>> + Send + 'b {
+        async move {
+            use fsocial_common::{OutputPayload, OutputMetadata};
+        let bot_watermark = "\n\nСкачано с помощью бота @FSocial_Media_Downloader_bot";
+
+        match &output.payload {
+            OutputPayload::Resource { uri } => {
+                let resource = self.resolver.resolve(uri).await?;
+                let (input_file, fallback_url) = match resource {
+                    ResolvedResource::LocalTempFile(path) => {
+                        let path_to_send = if self.config.is_local_api() {
+                            let abs_path = std::fs::canonicalize(&path).unwrap_or(path.clone());
+                            teloxide::types::InputFile::file_id(format!("file://{}", abs_path.to_string_lossy()).into())
+                        } else {
+                            teloxide::types::InputFile::file(path)
+                        };
+                        (path_to_send, None)
+                    },
+                    ResolvedResource::DirectUrl(url) => {
+                        (teloxide::types::InputFile::url(url.parse()?), Some(url))
+                    }
+                };
+
+                let mut resolved_thumb = None;
+                if let OutputMetadata::Video(meta) = &output.metadata {
+                    if let Some(thumb_uri) = &meta.thumb_uri {
+                        let thumb_res = self.resolver.resolve(thumb_uri).await?;
+                        if let ResolvedResource::LocalTempFile(path) = thumb_res {
+                            let path_to_send = if self.config.is_local_api() {
+                                let abs_path = std::fs::canonicalize(&path).unwrap_or(path.clone());
+                                teloxide::types::InputFile::file_id(format!("file://{}", abs_path.to_string_lossy()).into())
+                            } else {
+                                teloxide::types::InputFile::file(path)
+                            };
+                            resolved_thumb = Some(path_to_send);
+                        }
+                    }
+                }
+
+                match &output.metadata {
+                    OutputMetadata::Video(_) => Ok(TelegramMessage::Video {
+                        input_file, caption: Some(bot_watermark.to_string()), thumb: resolved_thumb, reply_to: reply_to_message_id, fallback_url
+                    }),
+                    OutputMetadata::Audio(meta) => Ok(TelegramMessage::Audio {
+                        input_file, caption: Some(bot_watermark.trim_start().to_string()), thumb: resolved_thumb, 
+                        title: meta.title.clone(), performer: meta.performer.clone(), reply_to: reply_to_message_id, fallback_url
+                    }),
+                    OutputMetadata::Image(_) => Ok(TelegramMessage::Photo {
+                        input_file, caption: Some(bot_watermark.to_string()), reply_to: reply_to_message_id, fallback_url
+                    }),
+                    OutputMetadata::Document(_) | OutputMetadata::None => Ok(TelegramMessage::Document {
+                        input_file, caption: Some(bot_watermark.to_string()), thumb: resolved_thumb, reply_to: reply_to_message_id, fallback_url
+                    }),
+                }
+            },
+            OutputPayload::InlineText { text } => {
+                Ok(TelegramMessage::Text { text: text.clone(), reply_to: reply_to_message_id })
+            }
+        }
+        }
+    }
+}
+
+pub trait DeliveryStrategy {
+    async fn deliver(&self, presentation: TelegramMessage) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+}
+
+pub struct TelegramDelivery<'a, R: UriResolver> {
+    pub bot: &'a crate::MyBot,
+    pub chat_id: teloxide::types::ChatId,
+    pub config: &'a fsocial_common::AppConfig,
+    pub resolver: &'a R,
+}
+
+impl<'a, R: UriResolver> DeliveryStrategy for TelegramDelivery<'a, R> {
+    async fn deliver(&self, presentation: TelegramMessage) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let mut temp_paths_to_clean = vec![];
+
+        match presentation {
+            TelegramMessage::Video { input_file, caption, thumb, reply_to, fallback_url } => {
+                let mut req = self.bot.send_video(self.chat_id, input_file);
+                if let Some(c) = &caption { req = req.caption(c.clone()); }
+                if let Some(t) = &thumb { req = req.thumbnail(t.clone()); }
+                if let Some(r) = reply_to { req = req.reply_parameters(teloxide::types::ReplyParameters::new(teloxide::types::MessageId(r))); }
+                
+                if let Err(e) = req.await {
+                    if let Some(url) = fallback_url {
+                        tracing::warn!("Telegram rejected DirectUrl Video, falling back: {}", e);
+                        let temp_path = self.resolver.download_to_temp(&url).await?;
+                        temp_paths_to_clean.push(temp_path.clone());
+                        let fallback_input = if self.config.is_local_api() { teloxide::types::InputFile::file_id(format!("file://{}", std::fs::canonicalize(&temp_path).unwrap_or(temp_path.clone()).to_string_lossy()).into()) } else { teloxide::types::InputFile::file(temp_path) };
+                        let mut req2 = self.bot.send_video(self.chat_id, fallback_input);
+                        if let Some(c) = caption { req2 = req2.caption(c); }
+                        if let Some(t) = thumb { req2 = req2.thumbnail(t); }
+                        if let Some(r) = reply_to { req2 = req2.reply_parameters(teloxide::types::ReplyParameters::new(teloxide::types::MessageId(r))); }
+                        req2.await?;
+                    } else { return Err(e.into()); }
+                }
+            },
+            TelegramMessage::Audio { input_file, caption, thumb, title, performer, reply_to, fallback_url } => {
+                let mut req = self.bot.send_audio(self.chat_id, input_file);
+                if let Some(c) = &caption { req = req.caption(c.clone()); }
+                if let Some(t) = &thumb { req = req.thumbnail(t.clone()); }
+                if let Some(ti) = &title { req = req.title(ti.clone()); }
+                if let Some(p) = &performer { req = req.performer(p.clone()); }
+                if let Some(r) = reply_to { req = req.reply_parameters(teloxide::types::ReplyParameters::new(teloxide::types::MessageId(r))); }
+                
+                if let Err(e) = req.await {
+                    if let Some(url) = fallback_url {
+                        tracing::warn!("Telegram rejected DirectUrl Audio, falling back: {}", e);
+                        let temp_path = self.resolver.download_to_temp(&url).await?;
+                        temp_paths_to_clean.push(temp_path.clone());
+                        let fallback_input = if self.config.is_local_api() { teloxide::types::InputFile::file_id(format!("file://{}", std::fs::canonicalize(&temp_path).unwrap_or(temp_path.clone()).to_string_lossy()).into()) } else { teloxide::types::InputFile::file(temp_path) };
+                        let mut req2 = self.bot.send_audio(self.chat_id, fallback_input);
+                        if let Some(c) = caption { req2 = req2.caption(c); }
+                        if let Some(t) = thumb { req2 = req2.thumbnail(t); }
+                        if let Some(ti) = title { req2 = req2.title(ti); }
+                        if let Some(p) = performer { req2 = req2.performer(p); }
+                        if let Some(r) = reply_to { req2 = req2.reply_parameters(teloxide::types::ReplyParameters::new(teloxide::types::MessageId(r))); }
+                        req2.await?;
+                    } else { return Err(e.into()); }
+                }
+            },
+            TelegramMessage::Photo { input_file, caption, reply_to, fallback_url } => {
+                let mut req = self.bot.send_photo(self.chat_id, input_file);
+                if let Some(c) = &caption { req = req.caption(c.clone()); }
+                if let Some(r) = reply_to { req = req.reply_parameters(teloxide::types::ReplyParameters::new(teloxide::types::MessageId(r))); }
+                
+                if let Err(e) = req.await {
+                    if let Some(url) = fallback_url {
+                        tracing::warn!("Telegram rejected DirectUrl Photo, falling back: {}", e);
+                        let temp_path = self.resolver.download_to_temp(&url).await?;
+                        temp_paths_to_clean.push(temp_path.clone());
+                        let fallback_input = if self.config.is_local_api() { teloxide::types::InputFile::file_id(format!("file://{}", std::fs::canonicalize(&temp_path).unwrap_or(temp_path.clone()).to_string_lossy()).into()) } else { teloxide::types::InputFile::file(temp_path) };
+                        let mut req2 = self.bot.send_photo(self.chat_id, fallback_input);
+                        if let Some(c) = caption { req2 = req2.caption(c); }
+                        if let Some(r) = reply_to { req2 = req2.reply_parameters(teloxide::types::ReplyParameters::new(teloxide::types::MessageId(r))); }
+                        req2.await?;
+                    } else { return Err(e.into()); }
+                }
+            },
+            TelegramMessage::Document { input_file, caption, thumb, reply_to, fallback_url } => {
+                let mut req = self.bot.send_document(self.chat_id, input_file);
+                if let Some(c) = &caption { req = req.caption(c.clone()); }
+                if let Some(t) = &thumb { req = req.thumbnail(t.clone()); }
+                if let Some(r) = reply_to { req = req.reply_parameters(teloxide::types::ReplyParameters::new(teloxide::types::MessageId(r))); }
+                
+                if let Err(e) = req.await {
+                    if let Some(url) = fallback_url {
+                        tracing::warn!("Telegram rejected DirectUrl Document, falling back: {}", e);
+                        let temp_path = self.resolver.download_to_temp(&url).await?;
+                        temp_paths_to_clean.push(temp_path.clone());
+                        let fallback_input = if self.config.is_local_api() { teloxide::types::InputFile::file_id(format!("file://{}", std::fs::canonicalize(&temp_path).unwrap_or(temp_path.clone()).to_string_lossy()).into()) } else { teloxide::types::InputFile::file(temp_path) };
+                        let mut req2 = self.bot.send_document(self.chat_id, fallback_input);
+                        if let Some(c) = caption { req2 = req2.caption(c); }
+                        if let Some(t) = thumb { req2 = req2.thumbnail(t); }
+                        if let Some(r) = reply_to { req2 = req2.reply_parameters(teloxide::types::ReplyParameters::new(teloxide::types::MessageId(r))); }
+                        req2.await?;
+                    } else { return Err(e.into()); }
+                }
+            },
+            TelegramMessage::Text { text, reply_to } => {
+                let mut req = self.bot.send_message(self.chat_id, text);
+                if let Some(r) = reply_to { req = req.reply_parameters(teloxide::types::ReplyParameters::new(teloxide::types::MessageId(r))); }
+                req.await?;
+            }
+        }
+
+        for temp in temp_paths_to_clean {
+            let _ = tokio::fs::remove_file(temp).await;
+        }
+
+        Ok(())
     }
 }
