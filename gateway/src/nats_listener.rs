@@ -789,7 +789,6 @@ impl<'a, R: UriResolver> PresentationMapper for TelegramPresentationMapper<'a, R
                             resolved_thumb = Some(path_to_send);
                         }
                     }
-                }
 
                 match &output.metadata {
                     OutputMetadata::Video(_) => Ok(TelegramMessage::Video {
