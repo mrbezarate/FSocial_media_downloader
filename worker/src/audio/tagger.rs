@@ -76,6 +76,9 @@ pub async fn apply_tags(
         }
 
         if let Some(cover) = cover_data {
+            tag.remove_picture_type(PictureType::CoverFront);
+            tag.remove_picture_type(PictureType::Other);
+            
             let pic =
                 Picture::new_unchecked(PictureType::CoverFront, Some(MimeType::Jpeg), None, cover);
             tag.push_picture(pic);

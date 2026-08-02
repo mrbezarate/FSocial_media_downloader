@@ -771,10 +771,15 @@ impl<'a, R: UriResolver> PresentationMapper for TelegramPresentationMapper<'a, R
                 };
 
                 let mut resolved_thumb = None;
-                if let OutputMetadata::Video(meta) = &output.metadata {
-                    if let Some(thumb_uri) = &meta.thumb_uri {
-                        let thumb_res = self.resolver.resolve(thumb_uri).await?;
-                        if let ResolvedResource::LocalTempFile(path) = thumb_res {
+                let thumb_uri_opt = match &output.metadata {
+                    OutputMetadata::Video(meta) => meta.thumb_uri.as_ref(),
+                    OutputMetadata::Audio(meta) => meta.thumb_uri.as_ref(),
+                    _ => None,
+                };
+                
+                if let Some(thumb_uri) = thumb_uri_opt {
+                    let thumb_res = self.resolver.resolve(thumb_uri).await?;
+                    if let ResolvedResource::LocalTempFile(path) = thumb_res {
                             let path_to_send = if self.config.is_local_api() {
                                 let abs_path = std::fs::canonicalize(&path).unwrap_or(path.clone());
                                 teloxide::types::InputFile::file_id(format!("file://{}", abs_path.to_string_lossy()).into())
