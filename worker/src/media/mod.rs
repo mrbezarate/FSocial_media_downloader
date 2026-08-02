@@ -66,7 +66,12 @@ pub async fn process_media_task(
                                     .output();
                                 let _ =
                                     std::fs::rename(format!("{}_tmp.jpg", cover_path), &cover_path);
-                                thumb_path = Some(cover_path);
+                                thumb_path = Some(cover_path.clone());
+                                
+                                let mut final_cover_data = cover_data;
+                                if let Ok(scaled_cover) = tokio::fs::read(&cover_path).await {
+                                    final_cover_data = scaled_cover;
+                                }
 
                                 // Optionally apply the cover to the MP3 metadata if it's audio
                                 if task.quality.is_audio() {
@@ -90,7 +95,7 @@ pub async fn process_media_task(
                                     let _ = crate::audio::tagger::apply_tags(
                                         &output.file_path,
                                         &dummy_meta,
-                                        Some(cover_data),
+                                        Some(final_cover_data),
                                     )
                                     .await;
                                 }

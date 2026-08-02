@@ -100,7 +100,11 @@ pub async fn process_spotify_task(
                         ])
                         .output();
                     let _ = std::fs::rename(format!("{}_tmp.jpg", cover_path), &cover_path);
-                    thumb_path = Some(cover_path);
+                    thumb_path = Some(cover_path.clone());
+                    
+                    if let Ok(scaled_cover) = tokio::fs::read(&cover_path).await {
+                        cover_data = Some(scaled_cover);
+                    }
                 }
             }
             Err(e) => info!("Failed to download cover: {:?}", e),

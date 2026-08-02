@@ -119,7 +119,7 @@ async fn handle_result(
             let mut edit_success = false;
             let mut edit_res_msg = None;
 
-            if res.status_is_media {
+            if res.status_is_media && !is_audio {
                 if let Some(msg_id) = res.status_message_id {
                     let mid = teloxide::types::MessageId(msg_id);
                     let input_file = if config.is_local_api() {
