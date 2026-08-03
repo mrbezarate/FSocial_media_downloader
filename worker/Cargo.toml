@@ -23,3 +23,4 @@ regex = { workspace = true }
 futures = { workspace = true }
 base64 = { workspace = true }
 libc = "0.2.189"
+scopeguard = "1.2.0"

@@ -8,6 +8,7 @@ mod audio;
 mod info_handler;
 mod media;
 mod nats_consumer;
+pub mod file_guard;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

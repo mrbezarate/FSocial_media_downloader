@@ -14,6 +14,7 @@ mod nats_listener;
 mod ui;
 mod url_parser;
 pub mod utils;
+pub mod file_guard;
 
 pub type UrlCache = moka::future::Cache<String, String>;
 pub type TaskStates = moka::future::Cache<String, String>;

@@ -43,8 +43,12 @@ pub async fn apply_tags(
         std::fs::copy(&file_path, &temp_path)
             .map_err(|e| AppError::Tagging(format!("Failed to copy to temp: {}", e)))?;
 
+        let t_path = temp_path.clone();
+        scopeguard::defer! {
+            let _ = std::fs::remove_file(&t_path);
+        }
+
         let mut tagged_file = lofty::read_from_path(&temp_path).map_err(|e| {
-            let _ = std::fs::remove_file(&temp_path);
             AppError::Tagging(e.to_string())
         })?;
 
@@ -85,12 +89,10 @@ pub async fn apply_tags(
         }
 
         if let Err(e) = tag.save_to_path(&temp_path, WriteOptions::default()) {
-            let _ = std::fs::remove_file(&temp_path);
             return Err(AppError::Tagging(e.to_string()));
         }
 
         std::fs::rename(&temp_path, &file_path).map_err(|e| {
-            let _ = std::fs::remove_file(&temp_path);
             AppError::Tagging(format!("Failed to rename temp: {}", e))
         })?;
 

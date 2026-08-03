@@ -84,6 +84,10 @@ async fn handle_result(
                 return;
             }
             let path = PathBuf::from(&file_path);
+            let mut _guard = crate::file_guard::FileGuard::new(path.clone());
+            if let Some(thumb) = &thumb_path {
+                _guard.add(PathBuf::from(thumb));
+            }
 
             if let Ok(meta) = tokio::fs::metadata(&path).await {
                 let size_mb = meta.len() as f64 / (1024.0 * 1024.0);
@@ -103,10 +107,6 @@ async fn handle_result(
                     .parse_mode(teloxide::types::ParseMode::Html)
                     .await;
 
-                    let _ = tokio::fs::remove_file(&file_path).await;
-                    if let Some(thumb) = &thumb_path {
-                        let _ = tokio::fs::remove_file(thumb).await;
-                    }
                     return;
                 }
             }
@@ -295,12 +295,7 @@ async fn handle_result(
                             let _ = bot.delete_message(chat_id, mid).await;
                         }
                     }
-                    if let Err(e) = tokio::fs::remove_file(&file_path).await {
-                        error!("Failed to clean up file {}: {}", file_path, e);
-                    }
-                    if let Some(thumb) = &thumb_path {
-                        let _ = tokio::fs::remove_file(thumb).await;
-                    }
+                    // Handled by _guard
 
                     // Cache the file_id in Redis
                     if let Some(key) = cache_key {
@@ -467,13 +462,7 @@ async fn handle_result(
                         }
                     }
 
-                    // cleanup
-                    for (file_path, _, _, _, thumb_path, _, _) in chunk {
-                        let _ = tokio::fs::remove_file(file_path).await;
-                        if let Some(t) = thumb_path {
-                            let _ = tokio::fs::remove_file(t).await;
-                        }
-                    }
+                    // cleanup done by _guard
                 }
 
                 tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
@@ -493,12 +482,7 @@ async fn handle_result(
                 let _ = bot.delete_message(chat_id, mid).await;
             }
 
-            for (file_path, _, _, _, thumb_path, _, _) in files {
-                let _ = tokio::fs::remove_file(&file_path).await;
-                if let Some(thumb) = thumb_path {
-                    let _ = tokio::fs::remove_file(thumb).await;
-                }
-            }
+            // Cleanup done by _guard
         }
         TaskStatus::V2Completed { mut outputs, failed_count, failed_items } => {
             tracing::info!("Received V2Completed for chat {} with {} outputs", chat_id, outputs.len());

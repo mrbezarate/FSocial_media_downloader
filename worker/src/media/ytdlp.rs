@@ -26,6 +26,7 @@ pub async fn download(
     is_premium: bool,
 ) -> Result<YtDlpOutput, AppError> {
     let uuid = uuid::Uuid::new_v4().to_string();
+    let prefix_guard = crate::file_guard::PrefixGuard::new(output_dir.to_string(), uuid.clone());
     let mut cmd = Command::new(&config.ytdlp_path);
 
     cmd.arg("--no-warnings")
@@ -185,6 +186,7 @@ pub async fn download(
                         if let Ok(img_resp) = client.get(&img_url).send().await {
                             if let Ok(bytes) = img_resp.bytes().await {
                                 if tokio::fs::write(&file_path, &bytes).await.is_ok() {
+                                    prefix_guard.cancel();
                                     return Ok(YtDlpOutput {
                                         file_path,
                                         title: "Pinterest Image".to_string(),
@@ -217,7 +219,10 @@ pub async fn download(
     let _ = tokio::fs::remove_file(&info_path).await;
 
     let mut file_path = String::new();
-    let mut entries = tokio::fs::read_dir(output_dir).await.unwrap();
+    let mut entries = match tokio::fs::read_dir(output_dir).await {
+        Ok(e) => e,
+        Err(e) => return Err(AppError::Download(format!("Не удалось прочитать папку загрузки: {}", e))),
+    };
     while let Ok(Some(entry)) = entries.next_entry().await {
         let name = entry.file_name().to_string_lossy().to_string();
         if name.starts_with(&uuid) && !name.ends_with(".json") {
@@ -267,6 +272,7 @@ pub async fn download(
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
+    prefix_guard.cancel();
     Ok(YtDlpOutput {
         file_path,
         title,
