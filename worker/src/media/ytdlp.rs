@@ -79,7 +79,6 @@ pub async fn download(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .kill_on_drop(true)
         .spawn()?;
 
     struct KillProcessGroupOnDrop(Option<u32>);
@@ -132,6 +131,13 @@ pub async fn download(
         Ok(Ok(s)) => s,
         Ok(Err(e)) => return Err(AppError::Download(format!("Ошибка процесса yt-dlp: {}", e))),
         Err(_) => {
+            if let Some(pid) = _kill_guard.0 {
+                #[cfg(unix)]
+                unsafe {
+                    libc::kill(-(pid as i32), libc::SIGKILL);
+                }
+                _kill_guard.0 = None;
+            }
             let _ = child.kill().await;
             return Err(AppError::Download(
                 "Процесс скачивания завис и был прерван (таймаут 1 час)".into(),
