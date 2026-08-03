@@ -295,6 +295,31 @@ pub async fn handle(
             }
 
             if action == "admin" {
+                let user_id = q.from.id.0;
+                let admin_id_str = std::env::var("ADMIN_TELEGRAM_ID").unwrap_or_default();
+                let admin_id: u64 = admin_id_str.parse().unwrap_or(0);
+                let is_dev = q.from.username.as_deref()
+                    .map(|name| name.eq_ignore_ascii_case("UndaOn"))
+                    .unwrap_or(false);
+
+                let mut is_admin = user_id != 0 && (user_id == admin_id || is_dev);
+
+                if !is_admin && user_id != 0 {
+                    if let Ok(mut conn) = redis_pool.get().await {
+                        let is_in_set: bool = redis::cmd("SISMEMBER").arg("admins:set").arg(user_id).query_async(&mut conn).await.unwrap_or(false);
+                        if is_in_set {
+                            is_admin = true;
+                        }
+                    }
+                }
+
+                if !is_admin {
+                    if let Some(msg) = q.message {
+                        let _ = bot.send_message(msg.chat().id, "❌ У вас нет прав администратора.").await;
+                    }
+                    return Ok(());
+                }
+
                 if let Some(msg) = q.message {
                     match target {
                         "stats" => {
