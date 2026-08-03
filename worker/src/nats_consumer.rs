@@ -581,20 +581,22 @@ pub async fn run(
                                     let bytes_key = format!("today_bytes:{}", task.user_id);
                                     let dl_key = format!("today_downloads:{}", task.user_id);
 
-                                    let _: redis::RedisResult<()> = redis::pipe()
-                                        .cmd("INCRBY")
-                                        .arg(&bytes_key)
-                                        .arg(size)
-                                        .cmd("EXPIRE")
-                                        .arg(&bytes_key)
-                                        .arg(86400)
-                                        .cmd("INCR")
-                                        .arg(&dl_key)
-                                        .cmd("EXPIRE")
-                                        .arg(&dl_key)
-                                        .arg(86400)
-                                        .query_async(&mut conn)
-                                        .await;
+                                    let (bytes_ttl, dl_ttl): (i64, i64) = redis::pipe()
+                                        .cmd("TTL").arg(&bytes_key)
+                                        .cmd("TTL").arg(&dl_key)
+                                        .query_async(&mut conn).await.unwrap_or((-1, -1));
+
+                                    let mut pipe = redis::pipe();
+                                    pipe.cmd("INCRBY").arg(&bytes_key).arg(size);
+                                    if bytes_ttl < 0 {
+                                        pipe.cmd("EXPIRE").arg(&bytes_key).arg(86400);
+                                    }
+                                    pipe.cmd("INCR").arg(&dl_key);
+                                    if dl_ttl < 0 {
+                                        pipe.cmd("EXPIRE").arg(&dl_key).arg(86400);
+                                    }
+                                    
+                                    let _: redis::RedisResult<()> = pipe.query_async(&mut conn).await;
                                 }
                             }
                         }
