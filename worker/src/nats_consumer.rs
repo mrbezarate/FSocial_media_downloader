@@ -566,7 +566,7 @@ pub async fn run(
                                 }
                             }
                         }
-                        (idx, url.clone(), Err(final_err.unwrap()))
+                        (idx, url.clone(), Err(final_err.unwrap_or_else(|| fsocial_common::AppError::Download("Неизвестная ошибка скачивания".into()))))
                     }
                 })
                 .buffer_unordered(if is_playlist_mode { 3 } else { 1 });

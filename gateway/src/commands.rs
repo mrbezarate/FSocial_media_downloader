@@ -324,12 +324,15 @@ pub async fn handle(
                                 ),
                             )
                             .await?;
-                            let _ = bot
+                            if let Err(e) = bot
                                 .send_message(
                                     teloxide::types::ChatId(target_id as i64),
                                     format!("🎉 Вам был выдан Premium на {} дней от Администрации!", days),
                                 )
-                                .await;
+                                .await
+                            {
+                                tracing::warn!("Не удалось уведомить пользователя {} о выдаче Premium: {}", target_id, e);
+                            }
                             return Ok(());
                         }
                     }
