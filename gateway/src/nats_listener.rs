@@ -123,7 +123,7 @@ async fn handle_result(
                 if let Some(msg_id) = res.status_message_id {
                     let mid = teloxide::types::MessageId(msg_id);
                     let input_file = if config.is_local_api() {
-                        let abs_path = std::fs::canonicalize(&path).unwrap_or(path.clone());
+                        let abs_path = tokio::fs::canonicalize(&path).await.unwrap_or_else(|_| path.clone());
                         InputFile::file_id(format!("file://{}", abs_path.to_string_lossy()).into())
                     } else {
                         InputFile::file(path.clone())
@@ -139,8 +139,7 @@ async fn handle_result(
                         }
                         if let Some(thumb) = &thumb_path {
                             let thumb_file = if config.is_local_api() {
-                                let abs_thumb = std::fs::canonicalize(thumb)
-                                    .unwrap_or_else(|_| PathBuf::from(thumb));
+                                let abs_thumb = tokio::fs::canonicalize(thumb).await.unwrap_or_else(|_| PathBuf::from(thumb));
                                 InputFile::file_id(
                                     format!("file://{}", abs_thumb.to_string_lossy()).into(),
                                 )
@@ -175,8 +174,7 @@ async fn handle_result(
                                 .caption(bot_watermark.to_string());
                             if let Some(thumb) = &thumb_path {
                                 let thumb_file = if config.is_local_api() {
-                                    let abs_thumb = std::fs::canonicalize(thumb)
-                                        .unwrap_or_else(|_| PathBuf::from(thumb));
+                                    let abs_thumb = tokio::fs::canonicalize(thumb).await.unwrap_or_else(|_| PathBuf::from(thumb));
                                     InputFile::file_id(
                                         format!("file://{}", abs_thumb.to_string_lossy()).into(),
                                     )
@@ -200,7 +198,7 @@ async fn handle_result(
                 Ok(edit_res_msg.unwrap())
             } else {
                 let input_file = if config.is_local_api() {
-                    let abs_path = std::fs::canonicalize(&path).unwrap_or(path.clone());
+                    let abs_path = tokio::fs::canonicalize(&path).await.unwrap_or_else(|_| path.clone());
                     InputFile::file_id(format!("file://{}", abs_path.to_string_lossy()).into())
                 } else {
                     InputFile::file(path.clone())
@@ -217,8 +215,7 @@ async fn handle_result(
                     }
                     if let Some(thumb) = &thumb_path {
                         let thumb_file = if config.is_local_api() {
-                            let abs_thumb = std::fs::canonicalize(thumb)
-                                .unwrap_or_else(|_| PathBuf::from(thumb));
+                            let abs_thumb = tokio::fs::canonicalize(thumb).await.unwrap_or_else(|_| PathBuf::from(thumb));
                             InputFile::file_id(
                                 format!("file://{}", abs_thumb.to_string_lossy()).into(),
                             )
@@ -269,8 +266,7 @@ async fn handle_result(
                             .caption(bot_watermark.to_string());
                         if let Some(thumb) = &thumb_path {
                             let thumb_file = if config.is_local_api() {
-                                let abs_thumb = std::fs::canonicalize(thumb)
-                                    .unwrap_or_else(|_| PathBuf::from(thumb));
+                                let abs_thumb = tokio::fs::canonicalize(thumb).await.unwrap_or_else(|_| PathBuf::from(thumb));
                                 InputFile::file_id(
                                     format!("file://{}", abs_thumb.to_string_lossy()).into(),
                                 )
@@ -383,7 +379,7 @@ async fn handle_result(
                 {
                     let path = PathBuf::from(file_path);
                     let input_file = if config.is_local_api() {
-                        let abs_path = std::fs::canonicalize(&path).unwrap_or(path.clone());
+                        let abs_path = tokio::fs::canonicalize(&path).await.unwrap_or_else(|_| path.clone());
                         InputFile::file_id(format!("file://{}", abs_path.to_string_lossy()).into())
                     } else {
                         InputFile::file(path.clone())
@@ -399,8 +395,7 @@ async fn handle_result(
                         }
                         if let Some(thumb) = thumb_path {
                             let thumb_file = if config.is_local_api() {
-                                let abs_thumb = std::fs::canonicalize(thumb)
-                                    .unwrap_or_else(|_| PathBuf::from(thumb));
+                                let abs_thumb = tokio::fs::canonicalize(thumb).await.unwrap_or_else(|_| PathBuf::from(thumb));
                                 InputFile::file_id(
                                     format!("file://{}", abs_thumb.to_string_lossy()).into(),
                                 )
@@ -415,8 +410,7 @@ async fn handle_result(
                             InputMediaVideo::new(input_file).caption(bot_watermark.to_string());
                         if let Some(thumb) = thumb_path {
                             let thumb_file = if config.is_local_api() {
-                                let abs_thumb = std::fs::canonicalize(thumb)
-                                    .unwrap_or_else(|_| PathBuf::from(thumb));
+                                let abs_thumb = tokio::fs::canonicalize(thumb).await.unwrap_or_else(|_| PathBuf::from(thumb));
                                 InputFile::file_id(
                                     format!("file://{}", abs_thumb.to_string_lossy()).into(),
                                 )
@@ -758,7 +752,7 @@ impl<'a, R: UriResolver> PresentationMapper for TelegramPresentationMapper<'a, R
                 let (input_file, fallback_url) = match resource {
                     ResolvedResource::LocalTempFile(path) => {
                         let path_to_send = if self.config.is_local_api() {
-                            let abs_path = std::fs::canonicalize(&path).unwrap_or(path.clone());
+                            let abs_path = tokio::fs::canonicalize(&path).await.unwrap_or_else(|_| path.clone());
                             teloxide::types::InputFile::file_id(format!("file://{}", abs_path.to_string_lossy()).into())
                         } else {
                             teloxide::types::InputFile::file(path)
@@ -781,7 +775,7 @@ impl<'a, R: UriResolver> PresentationMapper for TelegramPresentationMapper<'a, R
                     let thumb_res = self.resolver.resolve(thumb_uri).await?;
                     if let ResolvedResource::LocalTempFile(path) = thumb_res {
                             let path_to_send = if self.config.is_local_api() {
-                                let abs_path = std::fs::canonicalize(&path).unwrap_or(path.clone());
+                                let abs_path = tokio::fs::canonicalize(&path).await.unwrap_or_else(|_| path.clone());
                                 teloxide::types::InputFile::file_id(format!("file://{}", abs_path.to_string_lossy()).into())
                             } else {
                                 teloxide::types::InputFile::file(path)
@@ -841,7 +835,7 @@ impl<'a, R: UriResolver> DeliveryStrategy for TelegramDelivery<'a, R> {
                         tracing::warn!("Telegram rejected DirectUrl Video, falling back: {}", e);
                         let temp_path = self.resolver.download_to_temp(&url).await?;
                         temp_paths_to_clean.push(temp_path.clone());
-                        let fallback_input = if self.config.is_local_api() { teloxide::types::InputFile::file_id(format!("file://{}", std::fs::canonicalize(&temp_path).unwrap_or(temp_path.clone()).to_string_lossy()).into()) } else { teloxide::types::InputFile::file(temp_path) };
+                        let fallback_input = if self.config.is_local_api() { teloxide::types::InputFile::file_id(format!("file://{}", tokio::fs::canonicalize(&temp_path).await.unwrap_or_else(|_| temp_path.clone()).to_string_lossy()).into()) } else { teloxide::types::InputFile::file(temp_path) };
                         let mut req2 = self.bot.send_video(self.chat_id, fallback_input);
                         if let Some(c) = caption { req2 = req2.caption(c); }
                         if let Some(t) = thumb { req2 = req2.thumbnail(t); }
@@ -863,7 +857,7 @@ impl<'a, R: UriResolver> DeliveryStrategy for TelegramDelivery<'a, R> {
                         tracing::warn!("Telegram rejected DirectUrl Audio, falling back: {}", e);
                         let temp_path = self.resolver.download_to_temp(&url).await?;
                         temp_paths_to_clean.push(temp_path.clone());
-                        let fallback_input = if self.config.is_local_api() { teloxide::types::InputFile::file_id(format!("file://{}", std::fs::canonicalize(&temp_path).unwrap_or(temp_path.clone()).to_string_lossy()).into()) } else { teloxide::types::InputFile::file(temp_path) };
+                        let fallback_input = if self.config.is_local_api() { teloxide::types::InputFile::file_id(format!("file://{}", tokio::fs::canonicalize(&temp_path).await.unwrap_or_else(|_| temp_path.clone()).to_string_lossy()).into()) } else { teloxide::types::InputFile::file(temp_path) };
                         let mut req2 = self.bot.send_audio(self.chat_id, fallback_input);
                         if let Some(c) = caption { req2 = req2.caption(c); }
                         if let Some(t) = thumb { req2 = req2.thumbnail(t); }
@@ -884,7 +878,7 @@ impl<'a, R: UriResolver> DeliveryStrategy for TelegramDelivery<'a, R> {
                         tracing::warn!("Telegram rejected DirectUrl Photo, falling back: {}", e);
                         let temp_path = self.resolver.download_to_temp(&url).await?;
                         temp_paths_to_clean.push(temp_path.clone());
-                        let fallback_input = if self.config.is_local_api() { teloxide::types::InputFile::file_id(format!("file://{}", std::fs::canonicalize(&temp_path).unwrap_or(temp_path.clone()).to_string_lossy()).into()) } else { teloxide::types::InputFile::file(temp_path) };
+                        let fallback_input = if self.config.is_local_api() { teloxide::types::InputFile::file_id(format!("file://{}", tokio::fs::canonicalize(&temp_path).await.unwrap_or_else(|_| temp_path.clone()).to_string_lossy()).into()) } else { teloxide::types::InputFile::file(temp_path) };
                         let mut req2 = self.bot.send_photo(self.chat_id, fallback_input);
                         if let Some(c) = caption { req2 = req2.caption(c); }
                         if let Some(r) = reply_to { req2 = req2.reply_parameters(teloxide::types::ReplyParameters::new(teloxide::types::MessageId(r))); }
@@ -903,7 +897,7 @@ impl<'a, R: UriResolver> DeliveryStrategy for TelegramDelivery<'a, R> {
                         tracing::warn!("Telegram rejected DirectUrl Document, falling back: {}", e);
                         let temp_path = self.resolver.download_to_temp(&url).await?;
                         temp_paths_to_clean.push(temp_path.clone());
-                        let fallback_input = if self.config.is_local_api() { teloxide::types::InputFile::file_id(format!("file://{}", std::fs::canonicalize(&temp_path).unwrap_or(temp_path.clone()).to_string_lossy()).into()) } else { teloxide::types::InputFile::file(temp_path) };
+                        let fallback_input = if self.config.is_local_api() { teloxide::types::InputFile::file_id(format!("file://{}", tokio::fs::canonicalize(&temp_path).await.unwrap_or_else(|_| temp_path.clone()).to_string_lossy()).into()) } else { teloxide::types::InputFile::file(temp_path) };
                         let mut req2 = self.bot.send_document(self.chat_id, fallback_input);
                         if let Some(c) = caption { req2 = req2.caption(c); }
                         if let Some(t) = thumb { req2 = req2.thumbnail(t); }

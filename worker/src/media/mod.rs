@@ -54,7 +54,7 @@ pub async fn process_media_task(
                         Ok(cover_data) => {
                             let cover_path = format!("{}_cover.jpg", output.file_path);
                             if let Ok(_) = tokio::fs::write(&cover_path, &cover_data).await {
-                                let _ = std::process::Command::new("ffmpeg")
+                                let _ = tokio::process::Command::new("ffmpeg")
                                     .args(&[
                                         "-y",
                                         "-i",
@@ -63,9 +63,10 @@ pub async fn process_media_task(
                                         "scale=320:320:force_original_aspect_ratio=decrease",
                                         &format!("{}_tmp.jpg", cover_path),
                                     ])
-                                    .output();
+                                    .output()
+                                    .await;
                                 let _ =
-                                    std::fs::rename(format!("{}_tmp.jpg", cover_path), &cover_path);
+                                    tokio::fs::rename(format!("{}_tmp.jpg", cover_path), &cover_path).await;
                                 thumb_path = Some(cover_path.clone());
                                 
                                 let mut final_cover_data = cover_data;

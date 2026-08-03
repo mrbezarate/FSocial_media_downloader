@@ -89,7 +89,7 @@ pub async fn process_spotify_task(
                 // Save cover to disk for Telegram API
                 let cover_path = format!("{}_cover.jpg", ytdlp_out.file_path);
                 if let Ok(_) = tokio::fs::write(&cover_path, &c).await {
-                    let _ = std::process::Command::new("ffmpeg")
+                    let _ = tokio::process::Command::new("ffmpeg")
                         .args(&[
                             "-y",
                             "-i",
@@ -98,8 +98,9 @@ pub async fn process_spotify_task(
                             "scale=320:320:force_original_aspect_ratio=decrease",
                             &format!("{}_tmp.jpg", cover_path),
                         ])
-                        .output();
-                    let _ = std::fs::rename(format!("{}_tmp.jpg", cover_path), &cover_path);
+                        .output()
+                        .await;
+                    let _ = tokio::fs::rename(format!("{}_tmp.jpg", cover_path), &cover_path).await;
                     thumb_path = Some(cover_path.clone());
                     
                     if let Ok(scaled_cover) = tokio::fs::read(&cover_path).await {
