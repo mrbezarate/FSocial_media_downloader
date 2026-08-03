@@ -613,25 +613,14 @@ pub async fn handle(
                                     .await;
                             }
 
-                            let cache_key =
-                                format!("file_id:{}:{}", task.quality.callback_id(), task.url);
-                            let mut cached_file_id = None;
-                            if let Ok(mut conn) = redis_pool.get().await {
-                                let res: redis::RedisResult<String> = redis::cmd("GET")
-                                    .arg(&cache_key)
-                                    .query_async(&mut conn)
-                                    .await;
-                                if let Ok(fid) = res {
-                                    cached_file_id = Some(fid);
-                                }
-                            }
+                            let cached_file_id = crate::utils::get_cached_file_id(&redis_pool, task.quality.callback_id(), &task.url).await;
 
                             if let Some(file_id) = cached_file_id {
                                 let input_file = teloxide::types::InputFile::file_id(
                                     teloxide::types::FileId(file_id),
                                 );
                                 let bot_watermark =
-                                    "\n\nСкачано с помощью бота @FSocial_Media_Downloader_bot";
+                                    crate::utils::BOT_WATERMARK;
 
                                 // If original message had a media (like thumbnail), edit it. Else edit text or delete and send new.
                                 // To keep it simple, we just delete the info message and send the cached file.

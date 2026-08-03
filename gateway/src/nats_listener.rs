@@ -129,7 +129,7 @@ async fn handle_result(
                         InputFile::file(path.clone())
                     };
 
-                    let bot_watermark = "\n\nСкачано с помощью бота @FSocial_Media_Downloader_bot";
+                    let bot_watermark = crate::utils::BOT_WATERMARK;
                     let media = if is_audio {
                         let mut aud = teloxide::types::InputMediaAudio::new(input_file)
                             .title(title.clone())
@@ -204,7 +204,7 @@ async fn handle_result(
                     InputFile::file(path.clone())
                 };
 
-                let bot_watermark = "\n\nСкачано с помощью бота @FSocial_Media_Downloader_bot";
+                let bot_watermark = crate::utils::BOT_WATERMARK;
                 let api_res = if is_audio {
                     let mut req = bot
                         .send_audio(chat_id, input_file)
@@ -337,11 +337,7 @@ async fn handle_result(
                     if let Some(msg_id) = res.status_message_id {
                         let mid = teloxide::types::MessageId(msg_id);
                         let err_msg = format!("❌ Ошибка отправки: {}", e);
-                        if let Err(_) = bot.edit_message_text(chat_id, mid, err_msg.clone()).await {
-                            let _ = bot
-                                .edit_message_caption(chat_id, mid)
-                                .caption(err_msg)
-                                .await;
+                        if let Err(_) = crate::utils::edit_message_text_or_caption(&bot, chat_id, mid, err_msg).await {
                         }
                     }
                 }
@@ -385,7 +381,7 @@ async fn handle_result(
                         InputFile::file(path.clone())
                     };
 
-                    let bot_watermark = "\n\nСкачано с помощью бота @FSocial_Media_Downloader_bot";
+                    let bot_watermark = crate::utils::BOT_WATERMARK;
                     if *is_audio {
                         let mut audio = InputMediaAudio::new(input_file)
                             .title(title.clone())
@@ -582,11 +578,7 @@ async fn handle_result(
             if let Some(msg_id) = res.status_message_id {
                 let mid = teloxide::types::MessageId(msg_id);
                 let err_msg = format!("❌ Ошибка: {}", error);
-                if let Err(_) = bot.edit_message_text(chat_id, mid, err_msg.clone()).await {
-                    let _ = bot
-                        .edit_message_caption(chat_id, mid)
-                        .caption(err_msg)
-                        .await;
+                if let Err(_) = crate::utils::edit_message_text_or_caption(&bot, chat_id, mid, err_msg).await {
                 }
             }
             if !retryable {
@@ -744,7 +736,7 @@ impl<'a, R: UriResolver> PresentationMapper for TelegramPresentationMapper<'a, R
     fn map<'b>(&'b self, output: &'b fsocial_common::Output, reply_to_message_id: Option<i32>) -> impl std::future::Future<Output = Result<TelegramMessage, Box<dyn std::error::Error + Send + Sync>>> + Send + 'b {
         async move {
             use fsocial_common::{OutputPayload, OutputMetadata};
-        let bot_watermark = "\n\nСкачано с помощью бота @FSocial_Media_Downloader_bot";
+        let bot_watermark = crate::utils::BOT_WATERMARK;
 
         match &output.payload {
             OutputPayload::Resource { uri } => {

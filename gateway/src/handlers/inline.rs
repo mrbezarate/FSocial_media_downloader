@@ -56,7 +56,7 @@ pub async fn handle(
     }
 
     let mut results = vec![];
-    let bot_watermark = "Скачано с помощью бота @FSocial_Media_Downloader_bot";
+    let bot_watermark = crate::utils::BOT_WATERMARK.trim_start();
     let result_id = Uuid::new_v4().to_string();
 
     if let Some(file_id_str) = cached_file_id {

@@ -13,6 +13,7 @@ mod nats_client;
 mod nats_listener;
 mod ui;
 mod url_parser;
+pub mod utils;
 
 pub type UrlCache = moka::future::Cache<String, String>;
 pub type TaskStates = moka::future::Cache<String, String>;
