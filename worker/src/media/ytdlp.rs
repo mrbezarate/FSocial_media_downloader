@@ -26,7 +26,7 @@ pub async fn download(
     is_premium: bool,
 ) -> Result<YtDlpOutput, AppError> {
     let uuid = uuid::Uuid::new_v4().to_string();
-    let prefix_guard = crate::file_guard::PrefixGuard::new(output_dir.to_string(), uuid.clone());
+    let prefix_guard = fsocial_common::file_guard::PrefixGuard::new(output_dir.to_string(), uuid.clone());
     let mut cmd = Command::new(&config.ytdlp_path);
 
     cmd.arg("--no-warnings")

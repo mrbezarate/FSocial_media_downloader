@@ -84,7 +84,7 @@ async fn handle_result(
                 return;
             }
             let path = PathBuf::from(&file_path);
-            let mut _guard = crate::file_guard::FileGuard::new(path.clone());
+            let mut _guard = fsocial_common::file_guard::FileGuard::new(path.clone());
             if let Some(thumb) = &thumb_path {
                 _guard.add(PathBuf::from(thumb));
             }
